@@ -1,7 +1,7 @@
 # Profit Master
 
 An Auction House addon for **WoW Forever**, using **Auctionator** as its required
-dependency. Current source version: **0.2.0** (Interface 16001).
+dependency. Current source version: **0.2.1** (Interface 16001).
 
 Profit Master finds auctions below vendor value, estimates disenchant proceeds,
 and verifies live listings before a player confirms a purchase. It includes
@@ -13,6 +13,11 @@ Version 0.2.0 adds a Quick scan of up to 300 learned item keys and prepares up t
 one verified auction on that click; an unprepared row loads a confirmation.
 Settings can restore confirmation for prepared rows. Commodity quantities keep
 their existing server-quote confirmation. See [the comparison and checks](docs/profit-master-comparison-20261115.md).
+
+Version 0.2.1 fixes a preparation handoff that could wait for an event already
+received, selects affordable variants, and validates large item books in bounded
+time slices. [Performance review and simulations](docs/profit-master-performance-20261115.md)
+separate measured offline behavior from the pending live capture.
 
 ## Install
 

@@ -1,10 +1,24 @@
-Profit Master 0.2.0 - Quick scan and prepared purchases
+Profit Master 0.2.1 - preparation handoff and bounded price checks
 
 Requires WoW Forever (Interface 16001) and Auctionator.
 Auctionator is a required dependency in the TOC, not an optional integration.
 Affected APIs source-checked against Forever build 1.60.1.70938 and Auctionator 347.
 This version is not yet tested in-game. Auctionator integration uses internal scan events and its
 full-scan controller; future Auctionator changes may require an update.
+
+0.2.1 fixes - use /reload when ready
+- Clicking while preparation is processing an already-received reply now hands
+  that book to the purchase check. It does not wait for another server event.
+- Preparation chooses an affordable variant instead of a larger unaffordable
+  profit. Each purchase still rechecks price, ownership, value and funds.
+- Foreground item checks select the best offer in one pass, with roughly 4 ms
+  slices and a 10,000-row safety cap. Cheap smaller books finish immediately.
+  Large expensive books yield to keep the UI responsive; this can add frame waits.
+- Completed book timers release their temporary caches before confirmation.
+- Debug logs now distinguish prepared-cache hits, expired/changed quotes, empty
+  native books and missing auction IDs. Item-book logs include raw row count,
+  lowest raw buyout, eligible count, slice count and measured processing time.
+  These diagnostic minima do not authorize a purchase or become history means.
 
 0.2.0 update: use /reload, then check that Quick scan appears. The previous
 mandatory-full-restart instruction was too strong; exact Forever reload behavior

@@ -4,7 +4,7 @@ local window, tabLibrary
 local TAB_ID = "ProfitMaster"
 local BUY_DIALOG = "PROFITMASTER_CONFIRM_BUY"
 local COMMODITY_DIALOG = "PROFITMASTER_CONFIRM_COMMODITY"
-local candidates, live = {}, {}
+local candidates = {}
 local page = 1
 local houseOpen, connected, scanBusy = false, false, false
 local auctionListener, auctionSubscriptions
@@ -16,7 +16,7 @@ local quote, selectedCandidate, verifying, quoteDialog
 local pendingDeal, recheck, batchBuy
 local pendingError
 local queuedSearch
-local selectedCommodity, commodityPurchase, commodityRead, commodityDeadline
+local selectedCommodity, commodityPurchase, commodityRead, commodityDeadline, itemRead
 local scanWork
 local replicateGeneration = 0
 local excluded, liveValued = {}, {}
@@ -136,11 +136,10 @@ local function ClearLive(keepScanPaused)
     events:UnregisterEvent("UI_ERROR_MESSAGE")
     for _, event in ipairs(COMMODITY_EVENTS) do events:UnregisterEvent(event) end
     local cancelCommodity = commodityPurchase ~= nil
-    selectedCommodity, commodityPurchase, commodityRead, commodityDeadline = false, nil, nil, nil
+    selectedCommodity, commodityPurchase, commodityRead, commodityDeadline, itemRead = false, nil, nil, nil, nil
     selectedKey, pendingPurchase = nil, nil
     quote, selectedCandidate, verifying, quoteDialog = nil, nil, false, nil
     pendingDeal, recheck, batchBuy, pendingError, queuedSearch = nil, nil, nil, nil, nil
-    live = {}
     StaticPopup_Hide(BUY_DIALOG)
     StaticPopup_Hide(COMMODITY_DIALOG)
     if cancelCommodity then C_AuctionHouse.CancelCommoditiesPurchase() end
@@ -423,6 +422,7 @@ ReadStock = function()
     local available, matching, missing, seen, itemCache = 0, nil, 0, {}, {}
     local function CheckBatch()
         if recheck ~= state then return end
+        timer = nil
         if time() >= state.deadline then RecheckTimedOut(); return end
         local started = GetTimePreciseSec()
         for i = index, math.min(index + 199, total) do
@@ -504,6 +504,7 @@ ReadCommodityLive = function()
     local best, missing, cache, seen = nil, false, {}, {}
     local function Batch()
         if commodityRead ~= state then return end
+        timer = nil
         if time() >= state.deadline then
             CancelPurchase("Commodity stock check timed out; unable to verify. Item kept.")
             return
@@ -563,57 +564,92 @@ end
 
 ReadLive = function()
     if queuedSearch then return end
-    if not selectedKey or pendingPurchase or quote or not verifying then
-        return
-    end
+    if not selectedKey or pendingPurchase or quote or not verifying then return end
     if recheck then
         if recheck.request == "processing" then recheck.changed = true; return end
         if recheck.request then return end
         ReadStock()
         return
     end
+    if itemRead then itemRead.changed = true; return end
     StopTimer()
-    live = {}
-    local itemCache = {}
-    local missingVendor = 0
-    for i = 1, C_AuctionHouse.GetNumItemSearchResults(selectedKey) do
-        local deal, missing = addon.LiveDeal(C_AuctionHouse.GetItemSearchResultInfo(selectedKey, i), itemCache)
-        if deal and not purchased[deal.auctionID] then
-            deal.resultIndex = i
-            live[#live + 1] = deal
-        elseif missing then
-            missingVendor = missingVendor + 1
+    local count = C_AuctionHouse.GetNumItemSearchResults(selectedKey)
+    if (issecretvalue and issecretvalue(count)) or type(count) ~= "number" or count < 0
+        or count >= math.huge or count ~= math.floor(count) then
+        CancelPurchase("Item results are unavailable. Results kept; no purchase sent.")
+        return
+    end
+    local state = { key = selectedKey, index = 1, total = count, deadline = commodityDeadline,
+        money = GetMoney(), batches = 0, cpu = 0 }
+    itemRead = state
+    local best, eligible, missingVendor, minimum = nil, 0, 0, nil
+    local itemCache, amounts, seen = {}, {}, {}
+    local function Batch()
+        if itemRead ~= state then return end
+        timer = nil
+        if time() >= state.deadline then
+            CancelPurchase("Item price check timed out while reading results. Results kept; no purchase sent.")
+            return
         end
-    end
-    addon.SortDeals(live)
-    verifying = false
-    local best
-    for _, deal in ipairs(live) do
-        if deal.cost <= GetMoney() then best = deal; break end
-    end
-    local coverage = C_AuctionHouse.HasFullItemSearchResults(selectedKey) and "" or " More listings available."
-    Trace("item_book", { eligible = #live, missing_vendor = missingVendor, full = coverage == "" })
-    if best then
-        local available, seen = 0, {}
-        for _, deal in ipairs(live) do
-            if deal.link == best.link and deal.cost == best.cost and not seen[deal.auctionID] then
-                available = available + deal.available
-                seen[deal.auctionID] = true
+        local started = GetTimePreciseSec()
+        state.batches = state.batches + 1
+        -- Time is the primary limit. A generous row cap avoids spreading cheap
+        -- cached reads across dozens of frames just to satisfy a tiny batch size.
+        for i = state.index, math.min(state.index + 9999, state.total) do
+            local info = C_AuctionHouse.GetItemSearchResultInfo(state.key, i)
+            if not (issecretvalue and issecretvalue(info)) and type(info) == "table" then
+                local amount = info.buyoutAmount
+                if not (issecretvalue and issecretvalue(amount)) and type(amount) == "number"
+                    and amount > 0 and amount < math.huge then minimum = math.min(minimum or amount, amount) end
             end
+            local deal, missing = addon.LiveDeal(info, itemCache)
+            if deal and not purchased[deal.auctionID] and not seen[deal.auctionID] then
+                deal.resultIndex = i
+                seen[deal.auctionID], eligible = true, eligible + 1
+                local byPrice = amounts[deal.link]
+                if not byPrice then byPrice = {}; amounts[deal.link] = byPrice end
+                byPrice[deal.cost] = (byPrice[deal.cost] or 0) + deal.available
+                if deal.cost <= state.money and (not best or deal.profit > best.profit
+                    or (deal.profit == best.profit and (deal.cost < best.cost
+                    or (deal.cost == best.cost and deal.link < best.link)))) then best = deal end
+            elseif missing then missingVendor = missingVendor + 1 end
+            state.index = i + 1
+            if GetTimePreciseSec() - started >= 0.004 then break end
         end
-        best.available = available
-        ShowQuote(best)
-    elseif missingVendor > 0 then
-        CancelPurchase("Exact vendor data is missing for " .. missingVendor .. " live listings. Results kept; try Buy again shortly." .. coverage)
-        return
-    elseif #live == 0 then
-        if coverage == "" then CancelPurchase("No purchasable auction was returned for this item.", true); return end
-        OfferMoreListings("No profitable auction found for this item. Results kept." .. coverage)
-    else
-        CancelPurchase("No affordable profitable auction found. Results kept." .. coverage)
-        return
+        state.cpu = state.cpu + GetTimePreciseSec() - started
+        if state.index <= state.total then timer = C_Timer.NewTimer(0, Batch); return end
+        itemRead = nil
+        -- A changed book or budget must be evaluated as a single fresh pass,
+        -- without sending a new search or extending the original deadline.
+        if state.changed or state.money ~= GetMoney() then
+            timer = C_Timer.NewTimer(0, ReadLive)
+            return
+        end
+        local full = C_AuctionHouse.HasFullItemSearchResults(state.key)
+        if (issecretvalue and issecretvalue(full)) or type(full) ~= "boolean" then
+            CancelPurchase("Item result coverage is unavailable. Results kept; no purchase sent.")
+            return
+        end
+        verifying = false
+        local coverage = full and "" or " More listings available."
+        Trace("item_book", { rows = count, eligible = eligible, missing_vendor = missingVendor, full = full,
+            minimum_buyout = minimum, batches = state.batches, cpu_ms = math.floor(state.cpu * 1000 + 0.5) })
+        if best then
+            best.available, best.availablePartial = amounts[best.link][best.cost], not full
+            ShowQuote(best)
+        elseif missingVendor > 0 then
+            CancelPurchase("Exact vendor data is missing for " .. missingVendor .. " live listings. Results kept; try Buy again shortly." .. coverage)
+            return
+        elseif eligible == 0 then
+            if full then CancelPurchase("No purchasable auction was returned for this item.", true); return end
+            OfferMoreListings("No profitable auction found for this item. Results kept." .. coverage)
+        else
+            CancelPurchase("No affordable profitable auction found. Results kept." .. coverage)
+            return
+        end
+        Refresh()
     end
-    Refresh()
+    Batch()
 end
 
 RequestMoreResults = function()
@@ -621,7 +657,7 @@ RequestMoreResults = function()
     local function Current()
         return selectedKey == key and selectedCandidate == candidate and recheck == state
             and selectedCommodity == commodity and verifying and not pendingPurchase and not quote
-            and not commodityRead and (not state or not state.request)
+            and not commodityRead and not itemRead and (not state or not state.request)
     end
     local function PublicTrue(value)
         return not (issecretvalue and issecretvalue(value)) and value == true
@@ -718,14 +754,21 @@ PreparePurchase = function(deal)
             end
             Refresh()
             return
-        elseif addon.Listings.InFlight(deal) then
+        end
+        local inFlight, arrived = addon.Listings.TakePending(deal)
+        if inFlight then
             -- Join the already dispatched search instead of sending it twice.
             StampPriceCheck("sent")
+            Trace("prepared_search_handoff", { results_ready = arrived })
             Status("Finishing the prepared listing check...")
             timer = C_Timer.NewTimer(15, function()
                 timer = nil
                 CancelPurchase("Prepared listing check timed out. No purchase sent; results kept.")
             end)
+            if arrived then
+                StampPriceCheck("results")
+                ReadLive()
+            end
             Refresh()
             return
         end
@@ -1279,7 +1322,7 @@ local function EnsureTab()
                 PauseScanWork()
                 StopTimer()
                 verifying = true
-                if selectedCommodity then commodityDeadline = time() + 15 end
+                commodityDeadline = time() + 15
                 timer = C_Timer.NewTimer(15, function()
                     timer = nil
                     CancelPurchase("More-listings request timed out. Results kept.")

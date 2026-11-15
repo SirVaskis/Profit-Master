@@ -1,6 +1,8 @@
 # Profit Master
 
-Current build: **0.2.0**. Use `/reload` first; a full restart is a fallback if the
+Current build: **0.2.1**. See the [performance review](profit-master-performance-20261115.md)
+for the preparation handoff fix and large-book simulations. Use `/reload` first;
+a full restart is a fallback if the
 new controls fail to load. The scan/buy merge, checks and manual checklist are in
 [the 2026-11-15 comparison](profit-master-comparison-20261115.md). Development and
 the connected Git checkout now live at `C:\src\Profit-Master`; older entries below

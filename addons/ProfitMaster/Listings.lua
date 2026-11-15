@@ -97,9 +97,13 @@ function listings.Has(deal)
         and record.quote.cost == deal.cost and record.quote.link == deal.link or false
 end
 
-function listings.InFlight(deal)
+function listings.TakePending(deal)
     local _, commodity, identity = listings.Key(deal)
-    return not commodity and pending and pending.identity == identity and pending.sent or false
+    if commodity or not pending or pending.identity ~= identity or not pending.sent then return false end
+    local arrived = pending.reading == true
+    CancelTimer()
+    pending = nil
+    return true, arrived
 end
 
 function listings.Current(key, quote)
@@ -115,29 +119,40 @@ function listings.Current(key, quote)
     end
     if Integer(quote.resultIndex, 1) then
         local found, current = At(quote.resultIndex)
-        if found then return current end
+        if found then return current, current and "present" or "listing_unavailable" end
     end
     local count = C_AuctionHouse.GetNumItemSearchResults(key)
-    if not Integer(count, 0) then return nil end
+    if not Integer(count, 0) then return nil, "native_book_unavailable" end
+    if count == 0 then return nil, "empty_native_book" end
     for i = 1, count do
         if i ~= quote.resultIndex then
             local found, current = At(i)
-            if found then return current end
+            if found then return current, current and "present" or "listing_unavailable" end
         end
     end
+    return nil, "auction_missing"
 end
 
 function listings.Quote(deal, purchased)
     local key, commodity, identity = listings.Key(deal)
     local record = identity and records[identity]
-    if commodity or not record or GetTimePreciseSec() - record.at >= FRESH
-        or record.quote.cost ~= deal.cost or record.quote.link ~= deal.link then return nil end
+    local age = record and GetTimePreciseSec() - record.at
+    local reason = commodity and "commodity" or not record and "not_prepared"
+        or age >= FRESH and "expired" or (record.quote.cost ~= deal.cost or record.quote.link ~= deal.link) and "display_changed"
+    if reason then
+        addon.Diagnostics.Log("prepared_lookup", { item = deal.itemID, result = reason, age_ms = age and math.floor(age * 1000 + 0.5) })
+        return nil
+    end
     local quote = record.quote
-    local current = not purchased[quote.auctionID] and listings.Current(key, quote)
+    local current, unavailable
+    if not purchased[quote.auctionID] then current, unavailable = listings.Current(key, quote) end
     if addon.SameListing(quote, current) then
+        addon.Diagnostics.Log("prepared_lookup", { item = deal.itemID, result = "hit", auction = quote.auctionID })
         current.available, current.availablePartial = quote.available, quote.availablePartial
         return current, key
     end
+    addon.Diagnostics.Log("prepared_lookup", { item = deal.itemID,
+        result = purchased[quote.auctionID] and "purchased" or current and "value_changed" or unavailable })
     records[identity] = nil
 end
 
@@ -169,6 +184,7 @@ local function Read(work)
     if not Integer(total, 0) then Finish(work); return end
     local function Batch()
         if not active or pending ~= work then return end
+        if not running then Finish(work); return end
         if GetTimePreciseSec() >= work.deadline then Finish(work); return end
         local started = GetTimePreciseSec()
         for i = index, math.min(index + 199, total) do
@@ -180,9 +196,9 @@ local function Read(work)
                 local byPrice = amounts[deal.link]
                 if not byPrice then byPrice = {}; amounts[deal.link] = byPrice end
                 byPrice[deal.cost] = (byPrice[deal.cost] or 0) + deal.available
-                if not best or deal.profit > best.profit
+                if deal.cost <= GetMoney() and (not best or deal.profit > best.profit
                     or (deal.profit == best.profit and (deal.cost < best.cost
-                    or (deal.cost == best.cost and deal.link < best.link))) then best = deal end
+                    or (deal.cost == best.cost and deal.link < best.link)))) then best = deal end
             elseif unavailable then missing = missing + 1 end
             index = i + 1
             if GetTimePreciseSec() - started >= 0.004 then break end

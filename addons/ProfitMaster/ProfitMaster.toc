@@ -2,7 +2,7 @@
 ## Title: Profit Master
 ## Notes: Vendor deals and 30-day observed auction prices alongside Auctionator.
 ## Author: Runev
-## Version: 0.2.0
+## Version: 0.2.1
 ## Dependencies: Auctionator
 ## SavedVariables: ProfitMasterDB, ProfitMasterDebugDB, ProfitMasterDisenchantDB
 
