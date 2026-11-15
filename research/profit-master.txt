@@ -1,0 +1,785 @@
+Profit Master API verification - 2026-11-12
+
+Configured installed client: _forever_, Interface 16001, last verified build
+1.60.1.70888 (project.json). Installed Auctionator.toc reports version 346 and 16001.
+No game input or runtime probe was used for this addon.
+
+Primary Blizzard UI source mirror, forever branch, pinned commit:
+4cd0ab752a77164f654ccbca9d0c1fe8dafceebe
+https://github.com/Gethe/wow-ui-source/tree/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe
+
+API definitions:
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AuctionHouseDocumentation.lua
+- GetReplicateItemInfo: quantity [3], total stack buyout [10], item ID [17].
+- SendSellSearchQuery: clear item key level/suffix; restricted to 100 requests/min.
+- GetItemKeyInfo.isCommodity identifies unsupported commodity buying.
+- GetNumItemSearchResults / GetItemSearchResultInfo / HasFullItemSearchResults /
+  RequestMoreItemSearchResults; ITEM_SEARCH_RESULTS_UPDATED and ADDED carry itemKey.
+- ItemSearchResultInfo includes exact itemLink, quantity, auctionID, buyoutAmount,
+  containsOwnerItem and containsAccountItem.
+- PlaceBid(auctionID, bidAmount) has restrictions; call from user click only.
+- AUCTION_HOUSE_PURCHASE_COMPLETED carries auctionID.
+- AUCTION_HOUSE_SHOW_ERROR reports a server error, not purchase success.
+
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/ItemDocumentation.lua
+- C_Item.GetItemInfo(itemLink) returns per-item sellPrice at [11].
+
+Blizzard UI reference:
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseItemBuyFrame.lua
+- Native buy frame uses the item-result APIs and explicit additional result pages.
+
+Local installed Auctionator source (read-only inspection):
+C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns\Auctionator
+- Source_ModernAH/FullScan/Mixins/Frame.lua: InitiateScan, 15-minute cooldown,
+  ScanComplete payload {replicateInfo, itemLink, timeLeft}; tuple indices 3/10/17.
+- Source_ModernAH/Core/Mixin.lua: Auctionator.State.FullScanFrameRef initialized
+  when the auction interface is shown.
+- Source/Utilities/EventBusMixin.lua: Register(listener, events), ReceiveEvent.
+- Source_ModernAH/Tabs/Buying/Item/Mixins/Dialog.lua: PlaceBid from BuyClicked.
+- Source_ModernAH/Constants/Main.lua: item listing sort order 4 (Buyout).
+- Source_ModernAH/API/v1/RegisterForDBUpdate.lua: public DB callback has no scan
+  payload, hence the explicitly documented internal ScanComplete integration.
+
+0.1.1 tab verification (same installed Auctionator 346 and client file version):
+- Libs_ModernAH/LibAHTab/README.md and LibAHTab.lua (minor version 5):
+  LibStub("LibAHTab-1-0", true), CreateTab(id, frame, label), SetSelected(id).
+  Creation requires an existing AuctionHouseFrame. The library manages addon tab
+  visibility and selection without adding entries to Blizzard's Tabs array.
+- Source_ModernAH/Tabs/Mixins/TabContainer.lua: Auctionator registers its own tabs
+  through that same library, with content frames parented to AuctionHouseFrame.
+- Source_ModernAH/Core/Mixin.lua: Auctioneer interaction events initialize AH UI.
+- Matching Blizzard_AuctionHouseFrame.xml: native AH size 800x538, bottom tabs,
+  bottom money frame and InsetFrameTemplate. Profit Master is anchored within
+  these bounds, below the AH title and above its money display.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseFrame.xml
+- Matching Blizzard_AuctionHouseFrame.lua: OnShow chooses a normal display mode;
+  SetDisplayMode is the shared library's existing visibility integration point.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseFrame.lua
+- Offline checks execute the actual installed LibAHTab source against mocked
+  Blizzard frames. They check native/other-addon switching, single registration,
+  closed-AH slash behavior, and purchase locking across tab switches.
+
+Offline mocks verify our logic; they cannot prove live compatibility, protected
+purchase behavior, correct runtime event timing, or actual vendor revenue.
+
+0.1.2 scan feedback verification:
+- Auctionator 346 Source_ModernAH/FullScan/Events.lua declares ScanProgress.
+- FullScan/Mixins/Frame.lua reports numeric fractions: 0.1 after requesting
+  replicate data, 0.2 after the server response, then item-cache progress.
+  That progress can reach 1 before MergeInfo/database processing emits 0.99
+  and finally ScanComplete with the snapshot. Profit Master caps this phase at
+  99%, then counts its own vendor checks as a separate stage before completion.
+- Source_ModernAH/Tabs/Auctionator/Mixins/ScanStatus.lua is Auctionator's own
+  caller using the same ScanProgress payload to display a percentage.
+- No elapsed-time estimate, smoothing ticker, or polling was added.
+- Matching Blizzard SmoothStatusBar.lua and ArchaeologyProgressBar.lua show
+  standard StatusBar SetMinMaxValues/SetValue use. Profit Master creates a plain
+  status bar without their animation/ticker mixins, using a solid fill texture.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_SharedXML/SmoothStatusBar.lua
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_FrameXML/ArchaeologyProgressBar.lua
+
+0.1.3 cooldown and speed investigation:
+- Source_ModernAH/Tabs/Auctionator/Mixins/ScanButton.lua selects its controller
+  using Config.Options.REPLICATE_SCAN. Source/Config/Main.lua defines that option
+  as replicate_scan_3, default false. Profit Master previously forced replicate,
+  explaining the mismatch with Auctionator's ability to start a browse scan.
+- Source_ModernAH/IncrementalScan/Mixins/Frame.lua: InitiateScan uses the shared
+  queued SendBrowseQuery; active flag is doingFullScan (not inProgress). It gathers
+  BrowseResultInfo in rawScan, then emits IncrementalScan.Events.ScanComplete with
+  that array after processing. Events.lua also defines start/progress/failure.
+- AddPrices stores resultInfo.minPrice as the database price with totalQuantity
+  as availability; this is an item-price summary, not a single stack buyout.
+- Matching Blizzard AuctionHouseDocumentation.lua documents BrowseResultInfo,
+  itemKey fields and SendSearchQuery. Matching Blizzard_AuctionHouseBrowseResultsFrame
+  passes browseResult to SelectBrowseResult and uses appearanceLink with a cached
+  C_Item.GetItemInfo(itemID) link fallback for display. Profit Master uses the same
+  fallback only for estimates; live buys still use each result's exact itemLink.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseBrowseResultsFrame.lua
+- Source-local inefficiencies: duplicate exact-link vendor lookups, a second lookup
+  for every skipped listing, 250-entry batches with a 0.01s requested delay, and
+  fresh vendor calculations for every preceding row while locating a Buy auction.
+- New processing reuses per-pass exact-link values, removes that second lookup,
+  caps batches at 1000 with a zero-delay yield, and values only the selected auction
+  during Buy revalidation. A browse candidate searches its exact key via
+  SendSearchQuery instead of a broad SendSellSearchQuery over all variants.
+- Offline comparison: tools/Benchmark-ProfitMaster.lua, saved 0.1.2 Deals.lua in
+  scratch/profit-master-0.1.2. For 200000 listings over 100 exact links, vendor-info
+  calls fell from 200000 to 100, with identical 100000 deals / 100000 copper profit.
+  Trivial mocked calls took 0.002s baseline versus 0.004s cached: this does NOT
+  demonstrate lower wall-clock latency or a game-speed multiplier. The confirmed
+  benefit is fewer engine API lookups and scheduled batches. Network, real engine
+  lookup cost, UI responsiveness and end-to-end latency require the user's test.
+
+0.1.4 false-zero investigation:
+- User observed zero candidates and "12948 unavailable listings skipped" in-game.
+  This proves incomplete evaluation in 0.1.3, not absence of profitable auctions.
+- BrowseDeal required GetItemKeyInfo before attempting C_Item.GetItemInfo. That
+  optional metadata was counted together with missing item/vendor data. It now
+  values an available cached item independently of optional AH key metadata.
+- Missing cached vendor data previously returned nil and was never requested or
+  rechecked. RequestLoadItemDataByID plus ITEM_DATA_LOAD_RESULT is documented in
+  the same pinned Forever ItemDocumentation.lua; payload is itemID and success.
+- The installed Auctionator full-scan source uses this item-data API/event pair;
+  the incremental browse scan supplies summaries and does not perform the same
+  per-item vendor data loading. This explains why browse results can arrive cold.
+- The new queue is event-driven, de-duplicates item IDs, limits in-flight requests
+  and synchronous dispatches to 32, and has a single shared 60-second deadline.
+  It retries affected rows in ordinary bounded processing batches with a fresh
+  per-pass cache. No item models or native extensions are loaded.
+- Non-item appearance links fall back to a cached item link for browse estimates;
+  they are never passed off as an executable exact-variant price.
+- Coverage now counts priced/unavailable/unsupported/no-vendor/not-cheap rows.
+  Remaining unavailable rows produce an explicit Incomplete data state.
+- 220 offline assertions passed, including 12948 initially cold distinct items,
+  32-request limits, synchronous callbacks, duplicate IDs, timeout/failure/late
+  callbacks, successful re-evaluation, and cancellation on AH close.
+- This reproduces the failure class with synthetic data; the actual 12948 game
+  rows, their reasons, and any real profitable auctions remain unobserved.
+
+0.1.5 database foundation and screenshot follow-up:
+- User requested an item/vendor database and 30-day auction-price history, with
+  historical underpricing detection explicitly deferred.
+- Screenshot of 0.1.4 shows 12956 scanned, 5 priced, 12934 unavailable, 17 unsupported,
+  0 no-vendor, 5 not-below-vendor. This is direct evidence that 0.1.4 did not resolve
+  live data coverage; no working scan or genuine zero-deal result is claimed.
+- ITEM_DATA_LOAD_RESULT's success argument is now counted (OK/failed) instead of
+  discarded. It does not establish vendor price availability; fresh GetItemInfo
+  results are still required. These counts may narrow the remaining live issue.
+- Added the ordinary TOC SavedVariables entry ProfitMasterDB, initialized only on
+  this addon's ADDON_LOADED event. Installed Auctionator Source/Initialize/Main.lua
+  uses the same lifecycle. No game/WTF writes are made by the development tools.
+- Market identity reuses Auctionator.Variables.GetConnectedRealmRoot() from
+  Source_ModernAH/Variables/Main.lua, verified in installed 346. It handles
+  connected realms and Forever regionally unique-name rulesets; no assumed
+  retail/legacy faction or neutral-market mapping is invented.
+- Every quote is stored in per-unit copper. Browse keys preserve actual AH key
+  level/suffix/species; replicate quotes use an explicitly broader item-ID series.
+  Data sources are never merged as if they were equivalent variant quotes.
+- Daily low/high/latest/sample counts describe observed quotes, not transactions,
+  statistical market values or historical profitability. No detection uses them yet.
+- Epoch time()/86400 defines UTC date buckets, today plus 29 preceding dates.
+  Matching Blizzard_SharedXML/TimeUtil.lua demonstrates time() for elapsed time;
+  retention itself is ordinary Lua arithmetic and does not need another game API.
+- Observations are recorded within existing bounded scan batches, before vendor
+  filtering, once per source row. Missing-data retries do not double-count them.
+  No extra scan, network request, ticker or polling is introduced for history.
+- Vendor observations are saved only after C_Item.GetItemInfo actually returns a
+  name and sellPrice; latest exact link/time are retained, and nil never becomes 0.
+  History is not consulted by candidate valuation or any purchase validation.
+- Schema is documented in History.lua; unsupported saved versions are preserved
+  and disabled instead of erased. Unknown prices/days are not backfilled.
+
+0.1.6 vendor-loading focus:
+- User's 0.1.5 screenshot: 12894 scanned, 3 priced, 12872 unavailable, 19 unsupported,
+  5332 item-load OK / 0 failed; database 5354 IDs and only 3 verified vendor prices.
+  A native item-record success is not sufficient evidence of a usable sell price.
+- Code inspection found an avoidable second dependency: BrowseDeal queried the
+  item ID only for its link, discarded the price in the same result, then performed
+  a separate link lookup. It could discard a valid numeric price if a display link
+  was absent/unready. Browse now reads name/price directly from the numeric ID.
+- Live valuation still calls GetItemInfo on the exact auction itemLink and cannot
+  borrow a base-ID vendor estimate or saved database value. Unknown exact prices
+  are reported as missing, not as proven absence of live bargains.
+- Loader previously released each slot on any ITEM_DATA_LOAD_RESULT notification.
+  It now verifies readable name and numeric vendor value before releasing the slot
+  as ready, and also consumes GET_ITEM_INFO_RECEIVED for full metadata readiness.
+  Failed loads and the original overall 60-second deadline remain bounded.
+- Primary Forever ItemDocumentation.lua declares GET_ITEM_INFO_RECEIVED(itemID,
+  success) as well as ITEM_DATA_LOAD_RESULT. Installed Auctionator's modern direct
+  search provider listens to GET_ITEM_INFO_RECEIVED for metadata-dependent work.
+- No installed addon assignment/hook replacing C_Item.GetItemInfo or its request
+  function was found in the read-only source search. No ProfitMaster SavedVariables
+  file was yet available for inspection; in-memory game values were not accessed.
+- 242 integrated and 56 history assertions passed: numeric price with failing link
+  lookup, missing display link, base-ID/variant isolation, early basic notification,
+  later metadata notification, correct history counts, cleanup, and prior behavior.
+- These are corrected code paths, not a verified explanation for every live missing
+  row. Live priced/unavailable and record-OK/vendor-ready counts require user testing.
+
+0.1.7 vendor-warning trace and price retention:
+- Latest screenshot: 12938 scanned, 4 priced, 12916 unavailable, 18 unsupported;
+  5341 item records OK, 5341 vendor data ready, 0 failed; only 4 stored vendor prices.
+  This proves the loader read values that the later valuation pass did not retain.
+- Located Auctionator's warning at installed Source_ModernAH/Tabs/Selling/Mixins/
+  SaleItem.lua:635, GetConfirmationMessage(). It calls C_Item.GetItemInfo on the
+  sale itemLink, gets ITEM_INFO.SELL_PRICE, multiplies by selected quantity and
+  compares against effective price after Auctionator.Constants.AfterAHCut.
+  The wording is CONFIRM_POST_BELOW_VENDOR in Locales/enUS.lua. This is an
+  implemented Auctionator warning path matching the user's description; a screenshot
+  of the warning itself was not provided. It is not evidence of a separate static
+  sell-price database. A seller-net-proceeds warning does not guarantee a buyer's
+  vendor-flip profit when the gross buyout exceeds vendor sell value.
+- Found concrete loss in Profit Master: VendorReady returned only a boolean,
+  discarding name/price while readable; Retry then reset itemCache to {} and
+  attempted another engine lookup after all other records finished loading.
+- Matching Blizzard_ObjectAPI/Mainline/Item.lua:304 explicitly marks item data
+  evictable. The screenshots fit eviction/unavailability between those reads;
+  the exact native eviction policy has not been observed or assumed.
+- CaptureVendorInfo now copies the actual public fields immediately and updates
+  verified vendor records then. Retry preserves captured tables, clearing only
+  failed lookups. Per-ID queues retain separate exact-link references for replicate
+  variants, so readiness for one variant cannot substitute for another's value.
+- Reproduced the loss with 12948 cold items whose native metadata becomes unavailable
+  immediately after each successful callback. Installed 0.1.6 fails this regression;
+  patched 0.1.7 passes it. 245 integrated + 56 history assertions passed, including
+  exact variant separation. This is offline regression evidence, not an in-game fix
+  confirmation. Buy still performs a new exact-link check with no scan cache.
+
+0.1.8 Buy and disappearing-result investigation:
+- User requested Buy directly instead of Check, reported "interface action failed
+  because of an add-on" on purchase, then reported that the list disappeared.
+- The old Buy handler set pendingPurchase, emptied live and refreshed/hid the
+  source controls BEFORE PlaceBid. This explains result loss even on rejection.
+  No original blocked function or taint trace was supplied/found; changing this
+  ordering is not proof that the original client-blocked action is resolved.
+- Installed Auctionator 346 Source_ModernAH/Tabs/Buying/Item/Mixins/Dialog.lua
+  calls PlaceBid directly from BuyClicked, then hides/resets its dialog. The native
+  buy-dialog source also uses a player-confirmed purchase. No secure-script
+  replacement, hooks, suppression, alternate privileged API or pcall is used.
+- Verified StaticPopup.lua at the same pinned Forever revision:
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_StaticPopup/StaticPopup.lua
+  StaticPopup_Show(which, textArg1, textArg2, data) accepts the exact quote data;
+  StaticPopup_OnClick invokes OnAccept before Hide. OnHide receives dialog.data
+  and covers Escape, cancel, replacement and expiry. Clear quote state before
+  programmatic Hide to avoid cancel recursion. Only our prefixed definition is set.
+- Every candidate now has Buy. The query callback only opens a price confirmation
+  for the highest-profit affordable currently returned stack. Final Buy performs
+  a fresh exact-ID/link/quantity/price/vendor/money check and submits from that
+  player click. Result rows and controls are not hidden before PlaceBid.
+- The original candidates remain after cancel/timeout/error/success. Confirmed
+  auction IDs are excluded from stale native cache results during this session;
+  no candidate is removed just because a request was sent. The query and purchase
+  timers are bounded, share existing timer state, and never retry a transaction.
+- ADDON_ACTION_BLOCKED/FORBIDDEN observations report the public addon/function
+  received while a request is active, retain rows and clear the pending state.
+  The native warning is not suppressed. No log CVars or game input were changed.
+- 293 integrated and 56 history assertions passed using the existing Lua 5.1 DLL.
+  New mocks exercise real click versus callback ordering, retained rows on every
+  failure, both blocked events, thrown handler interruption and timer recovery,
+  stale confirmation rejection, matching synchronous and asynchronous completion.
+  Offline execution cannot establish secure permission, taint behavior or actual
+  server purchase success. User /reload and one cheap confirmed buy remain needed.
+
+0.1.9 grouped availability versus individual auctions:
+- User screenshot from 0.1.8 shows 8 candidates, 12871 priced, 5365 saved verified
+  vendor prices of 5404 IDs. Vendor coverage is now visibly much broader. No
+  purchase completion, gold deduction or mail delivery was shown.
+- The confirmation incorrectly values Small Blue Pouch x139 at 3g47s50c vendor
+  versus a 3s buyout. That vendor total is 139 times 2s50c. LiveDeal passed search
+  row quantity directly to the legacy-style stack calculator; this mixed grouped
+  non-commodity availability with the price to buy just one auction ID.
+- Primary Forever Blizzard_AuctionHouseItemSellFrame.lua GetTotalPrice multiplies
+  quantity by buyout/bid price; posting quantity uses the AUCTION_MULTISELL events.
+  Thus multiple non-commodity copies are separate auctions at the quoted price.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseItemSellFrame.lua
+- Matching Blizzard_AuctionHouseItemBuyFrame.lua selects one row's auctionID and
+  buyout. Frame.lua StartItemBuyout and BuyoutDialogOnAccept send that ID and price
+  to PlaceBid; no grouped purchase quantity is submitted. TableBuilder displays
+  row quantity separately from the buyout. Installed Auctionator follows the same
+  one-ID buying path. GetAuctionInfoByID exposes price/link but no stack count;
+  no invented per-group auction IDs or new query API was introduced.
+- LiveDeal now requires positive public availability and values one item from the
+  exact link against the selected auction's buyout. The confirmation shows x1 and
+  its auction ID, and the UI wording says auction rather than live stack.
+- 301 integrated + 56 history assertions pass. New regression reproduces 139
+  pouches at 300 copper versus 250 vendor (rejected), and 240 copper versus 250
+  vendor (one item, 10 copper profit). A mixed-result check ignores a large losing
+  group and chooses an actually profitable auction. Changed group availability
+  alone does not alter that auction's one-item quantity; zero still rejects it.
+- Previous tests used an incorrect non-commodity stack model. Updated live test
+  prices/expectations reflect one-item purchases; replicate stack snapshots and
+  history retain their source-specific units. No saved data was deleted or used
+  for authorization. Real purchase quantity and revenue need the user's test.
+- Before/after reproduction also ran against the actual installed 0.1.8 Deals.lua
+  before deployment: it produced exactly the screenshot's 34450-copper false
+  profit, while staged 0.1.9 rejected the auction. A saved source copy and focused
+  comparison script remain under scratch/. Installed 0.1.9 after preview and
+  manifest validation, backup ProfitMaster-20261112-161229-425.zip. Five installed
+  files match staged hashes. No game input or changes to other addons were made.
+
+0.1.10 failed-buy removal:
+- Latest user instruction supersedes 0.1.8's keep-failed-item behavior: remove the
+  attempted item when its buy fails. Other candidates stay visible and usable.
+- CancelPurchase accepts an explicit failedBuy flag and removes selectedCandidate
+  by identity only on submitted-buy failure/unconfirmed timeout. It updates the
+  progress label's candidate count; existing Refresh clamps pages and hides empty
+  rows. No removal occurs before the restricted PlaceBid call.
+- AH rejection and blocked/forbidden events pass the flag only when a purchase
+  is pending. The existing 15-second purchase timeout also removes the attempted
+  item, while still reporting that mail/gold must be checked for an uncertain
+  outcome. No automatic retry, new timer, API or SavedVariables change is added.
+- Confirmation cancel/expiry, search errors/timeouts and preflight refusals retain
+  candidates. Matching success retains the group for further auctions. New scans
+  rebuild candidates normally; this is not a blacklist or a history deletion.
+- 344 integrated + 56 history assertions pass under Lua 5.1. Checks cover removal
+  on each submitted failure, late errors leaving other rows alone, rescan recovery,
+  canceled/preflight result retention, final-page clamping and empty-list usability.
+  These establish offline state handling, not actual protected purchase success.
+
+0.1.11 minimum-profit filter:
+- User requested hiding results with profit below 3 copper. The shared calculator
+  now excludes them, preserving the inclusive 3-copper boundary across browse,
+  replicate, live quotes and Buy-time validation. No new API or setting is added.
+- Filtered positive profits remain priced in coverage and are reported separately
+  as profit under 3c. History still records observed quotes before deal filtering.
+- 351 integrated + 56 history assertions pass under Lua 5.1, including 1/2/3-copper
+  boundaries for list and live valuation, grouped availability and scan coverage.
+  In-game display remains a user check after /reload and a new scan.
+
+0.1.12 successful-buy stock recheck and populated quantity:
+- User requested checking only the purchased item after success, retaining its
+  row if another copy is at the same price and removing it otherwise. They also
+  reported that Qty did not populate; the previous UI intentionally rendered a
+  dash for browse estimates. Both requests are implemented together.
+- Rechecked the pinned Forever AuctionHouseDocumentation.lua and matching
+  Blizzard_AuctionHouseFrame.lua RefreshSearchResults caller. The documented
+  RefreshItemSearchResults(itemKey, optional minLevel, optional maxLevel) refreshes
+  existing item results; native UI passes the key with no extra filters outside
+  its BuyItems context. Installed Auctionator's AH/Mixins/Throttling.lua handles
+  AUCTION_HOUSE_THROTTLED_SYSTEM_READY using IsThrottledMessageSystemReady.
+  Purchase completion and throttle readiness are documented synchronous events.
+- On matching purchase completion, save the bought exact link/price, close the
+  old confirmation and defer the read request until after the purchase callback.
+  Wait for throttle readiness without polling; inspect only matching item-key
+  results. Pagination uses the existing RequestMoreItemSearchResults API and one
+  shared 15-second overall deadline. Requests never extend that deadline.
+- Require a non-purchased auction ID, identical link/price and the existing 3c
+  minimum/ownership rules. Same-price copies update the row's unit values and
+  availability, then re-sort profit. Full results without a match remove the row.
+  Unknown/error/timeout keeps it with explicit incomplete verification. No action
+  in this path opens a confirmation or calls PlaceBid; every further buy needs
+  another player click. Tab switching preserves the check; AH close stops it.
+- Avail. now shows observed browse totalQuantity across prices or replicate source
+  quantity initially, then eligible copies at the purchased price after checking.
+  Duplicate IDs are not counted twice. Both candidate sources display per-item
+  prices/vendor/profit; replicate estimates normalize their actual total/count.
+  Live valuation still buys one item and never multiplies vendor price by stock.
+- 453 integrated + 56 history assertions pass under the existing Lua 5.1 runtime.
+  Checks cover live lifecycle, delayed/synchronous completion, throttle readiness,
+  changed/exhausted stock, pagination, price/variant identity, unknown metadata,
+  final deadlines and cancellation, populated quantities and normalized minimum
+  profit. No in-game buy, layout or server-response verification is claimed.
+
+Auctioneer migration canceled - 2026-11-12:
+- Read-only inspection found installed Auctioneer Forever / Auc-Advanced 4.0.4.
+  User initially authorized moving Profit Master, then paused the work, reported
+  Auctioneer's UI buggy and explicitly canceled the move in favor of Auctionator.
+- Partial source edits affected ProfitMaster.lua, History.lua and the manifest.
+  They were never installed and have been restored from the verified installed
+  0.1.12 files. All five addon source files match their installed hashes again.
+- 453 integrated + 56 history assertions and manifest validation passed after the
+  revert. No installation, game input, SavedVariables edits or other-addon changes
+  were made for the cancellation. Auctioneer's reported UI bug was not diagnosed.
+
+0.1.13 internal auction errors, responsive rechecks, quantity goals and streaming:
+- User asked to remove an attempted item on internal auction error, reported a
+  brief freeze after buying, requested multiple same-price copies, then requested
+  that candidates appear as soon as found so buying can begin earlier.
+- The screenshot shows a successful buy followed by all rows/controls disabled
+  while refreshing stock. This is direct evidence of a panel-wide wait, not an
+  FPS measurement. ReadStock now narrows to the exact link/price, avoids sorting
+  all live results and yields after 200 rows or about 4ms. Other rows/paging remain
+  available, and known same-price stock can finish without loading all pages.
+  Partial availability is rendered with >=; absence still requires full results.
+- Added a Quantity goal in the existing stock StaticPopup edit box. Verified the
+  pinned Blizzard_StaticPopup_Game/GameDialog.lua has hasEditBox, editBoxWidth,
+  editBoxInstructions and maxLetters, and GetEditBox returns the normal edit box.
+  StaticPopup_OnClick honors true from OnAccept to retain invalid input. Copies
+  are individually revalidated and submitted by Buy 1 clicks. Only an explicitly
+  active goal opens another quote after confirmed success; it never auto-buys.
+- PlaceBid's pinned generated signature remains auctionID, bidAmount, with
+  restrictions. Grouped rows do not expose an atomic multi-ID bulk-purchase API.
+  No loop over PlaceBid, callback purchase, secure bypass or simulated click exists.
+- The native AH error map in Blizzard_AuctionHouseUtil.lua maps DatabaseError to
+  ERR_AUCTION_DATABASE_ERROR. SystemDocumentation.lua declares UI_ERROR_MESSAGE
+  (errorType, message). Pending buys now match the public localized message and
+  remove only their selected candidate; the listener stops at success/cleanup.
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua
+https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_StaticPopup_Game/GameDialog.lua
+- Valuation publishes incremental best candidates and vendor-ready previews, with
+  redraw coalescing and a 4ms/1000-row processing bound. Selecting Buy pauses the
+  local stage and gives the same bounded timer to the purchase. Cleanup resumes
+  the original cursor/loader without repeated history recording. Up to 32 already
+  requested item loads may finish while paused; their real values are captured.
+- Current-scan exclusions prevent failed/exhausted items being resurrected by
+  remaining valuation. Fresh live values take precedence over the older snapshot.
+  Auctionator still completes its network scan before local valuation starts;
+  no scan cancellation, cooldown bypass, additional dependency or service is added.
+- 613 integrated + 56 history assertions pass under Lua 5.1. Coverage includes
+  synchronous/asynchronous internal errors and localization, exact click counts
+  for a goal of three, cancel/error/price/gold stops, 200-row recheck yields,
+  simulated time budgets, partial availability, early buys with queued valuation,
+  delayed prices arriving during a purchase, cache eviction and observation counts.
+  Purchase pauses preserve the remaining 60-second active vendor-loading budget;
+  a long confirmation cannot expire work that could not run during that pause.
+  This establishes offline behavior; actual game responsiveness/layout and server
+  purchase behavior remain unverified by the assistant.
+
+Coroutine/multicore feasibility - 2026-11-12:
+- User asked whether multiple cores or Lua coroutines could speed up processing.
+  Lua coroutines cooperate through explicit yield/resume; they are not OS worker
+  threads. No supported general worker-thread API was found in the pinned client
+  API/UI source. Coroutine scheduling cannot bypass AH request throttles or waits.
+  https://www.lua.org/manual/5.1/manual.html#2.11
+  https://www.lua.org/manual/5.1/manual.html#2.2
+- Added tools/Benchmark-ProfitMasterCoroutines.lua outside the shipped addon. It
+  compares current-style timer batch work with a coroutine driver using identical
+  Deals.lua valuation, 200000 rows, 1000 cached item links, 1000-row/4ms slices,
+  and seven alternating trials. Lua 5.1-compatible OBS LuaJIT runtime, JIT disabled:
+  median batches 0.050s, coroutine 0.058s. Both produced 133334 eligible rows,
+  1333340 copper summed per-row profit, and 1000 mocked item-info lookups.
+- This synthetic comparison does not measure native API cost, C_Timer delivery,
+  rendering/FPS or server latency; it does not establish game performance. It
+  gives no evidence for a coroutine rewrite. Profit Master remains installed at
+  0.1.13, with its bounded timer batches unchanged. No game input or install.
+
+0.1.14 half-stock defaults and fewer repeat-purchase requests - 2026-11-12:
+- User reports multiple purchases are too slow and asks for a default near half
+  available stock so they can click Buy. The first live quote now defaults to
+  max(1, floor(observed same-link/same-price stock / 2)), capped by affordable gold.
+  Continuing quotes use the remaining goal; all quantities are editable.
+- Rechecked the pinned 1.60.1.70888 generated AuctionHouseDocumentation.lua and
+  Blizzard_AuctionHouseItemBuyFrame.lua. GetItemSearchResultInfo supplies individual
+  actionable IDs; PlaceBid still accepts one auctionID and amount, not a count.
+  The native item list reads current search results and is dirtied by item-result
+  and bid events. No new API, protected call context or input simulation is added.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AuctionHouseDocumentation.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseItemBuyFrame.lua
+- A remaining goal now reads the client's known same-price results after success,
+  deferring until outside the confirmation callback and respecting native readiness.
+  Another unpurchased ID opens the next quote without RefreshItemSearchResults.
+  Every Buy click still validates its current exact ID/link/cost/vendor and funds.
+  No known ID falls back to the existing refresh under the original deadline;
+  grouped quantity cannot synthesize a successor ID. Goal completion refreshes
+  stock as before. The previous 200-row/4ms slice bound and one timer remain.
+- 670 integrated + 56 history offline assertions pass. They verify the default,
+  known-ID paths without an intervening network refresh, exact manual bid counts,
+  changed cached prices, synchronous completion, throttle events, grouped-ID
+  fallback, final refresh and existing purchase/history/scan regressions.
+  Manifest validation passed; no luac is installed. No actual server latency,
+  game FPS, popup layout or secure-action behavior is established by mocks.
+- Installed 0.1.14 after -WhatIf preview, backing up 0.1.13 to
+  backups/ProfitMaster-20261112-172338-811.zip. Five installed hashes match source.
+  History.lua and Deals.lua are unchanged. No other addon, saved data or game input
+  was modified. A grouped-ID fallback sends its refresh in the already-deferred
+  pass rather than adding an extra zero-delay timer/frame; the check covers this.
+
+0.1.15 streaming scan/valuation pipeline and bulk-buy investigation - 2026-11-12:
+- User asks to buy the selected quantity in one click and to overlap scanning,
+  comparison and list publication. Rechecked pinned Forever AH generated docs and
+  Blizzard_AuctionHouseFrame.lua BuyoutDialogOnAccept. PlaceBid accepts a single
+  auctionID/amount and has restrictions. Start/ConfirmCommoditiesPurchase accept
+  a quantity, but belong to commodities, currently excluded from Profit Master.
+  The non-commodity grouped row can expose just one ID, not a list for its entire
+  quantity. No supported general bulk-quantity purchase call was found; signatures
+  alone do not establish how many calls a hardware event would permit. No risky
+  loop/native restriction bypass was added and no one-click bulk buy is claimed.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AuctionHouseDocumentation.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseFrame.lua
+- Inspected installed Auctionator 346 IncrementalScan/Mixins/Frame.lua AddPrices,
+  FireProgressEvent and NextStep: rawScan contains original result tables, with a
+  progress event after every append batch. The initial UPDATED handler replaces
+  the old buffer. NextStep passes that same buffer to its final completion event,
+  after releasing doingFullScan and finishing Auctionator's database callback.
+- FullScan/Mixins/Frame.lua ProcessBatch fires progress before each 250-row batch:
+  0.2 + startIndex / GetNumReplicateItems() * 0.8. scanData holds original row tables
+  at index+1, with asynchronous holes. EndProcessing's fixedScanData reuses row
+  objects. It releases inProgress before database finishing. These implementation
+  details enable early reads without hooks, extra network queries or addon edits.
+- ProcessScan now accepts streamed input, yields while consuming it, flushes dirty
+  display state and sleeps without polling when input is empty. Per-buffer cursors
+  and row identity prevent re-valuing/history duplicates in the final payload.
+  Sparse late rows reconcile at completion. Existing vendor loading starts after
+  input closes, so cold prices may still wait. Purchases pause valuation and can
+  coexist with final payload arrival after the provider releases its busy state.
+- 692 integrated and 56 history assertions pass under the local Lua 5.1-compatible
+  runtime. New tests exercise provider receipt, sparse holes, final reconciliation,
+  exact observation counts, busy gating, early quotes, render flushing, bounded
+  batches, no idle timers, failure and AH close. No game FPS, server latency or
+  actual secure-action behavior has been tested by the assistant.
+- Installed 0.1.15 after manifest checks and -WhatIf preview. Backup of 0.1.14:
+  backups/ProfitMaster-20261112-173227-146.zip. Five installed hashes match staged
+  files. History.lua/Deals.lua, other addons and saved data were not edited. No
+  game input/reload was sent. User should test time to first visible/buyable row.
+
+0.1.16 commodity quantity buying - 2026-11-12:
+- User explicitly requested true commodities with one-click selected-quantity
+  buying. Rechecked pinned Forever 1.60.1.70888 generated AH API, native commodity
+  BuyFrame/BuyDialog, Frame.lua and installed Auctionator 346 commodity mixins.
+  StartCommoditiesPurchase is restricted; ConfirmCommoditiesPurchase is public
+  without that restriction. Native code starts a quantity quote and confirms the
+  same item/quantity after pricing, with quote lifetime and success/failure events.
+  EnvironmentCleanup does not remove these public functions. Callback confirmation
+  is an inference from the API annotations; actual engine permission needs game QA.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AuctionHouseDocumentation.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseCommoditiesBuyFrame.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseBuyDialog.lua
+- Commodity rows provide item/price/quantity/ownership; ordinary owned quantities
+  can be subtracted. Account-containing rows are skipped because their owned count
+  is unavailable. Lowest eligible price and exact-tier counts are used, with the
+  existing per-item 3c rule and fresh vendor data. No commodity purchase uses
+  individual-auction PlaceBid or treats group count as an item auction's quantity.
+- One explicit Buy quantity click requests one bounded transaction. Server unit
+  price AND total must equal the authorized price and price*quantity; expired,
+  restricted/changed quotes or changed funds/vendor value cancel. Exact quote
+  confirmation happens once, including synchronous/duplicate event handling.
+  No retry, simulated input, extra quantity or protected API workaround exists.
+- Added a native commodity confirmation with live quantity totals using verified
+  GameDialog SetText/GetButton1/Resize and SharedTemplates EditBoxOnTextChanged.
+  The half-stock/gold default is retained. Tab leave cancels a pending quote;
+  AH close cancels work. Success uses commodity refresh/pagination and retains
+  the row only for remaining same-price stock; unavailable metadata is not absence.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_StaticPopup/SharedTemplates.lua
+- 823 integrated + 56 history assertions pass under the local compatible Lua
+  runtime. They exercise pricing/quantity, one-click authorization, matching quote
+  confirmation, races, failures, budgets, ownership, pagination and regressions.
+  No real commodity purchase, native popup render or game latency was tested.
+- Manifest validation passed; luac is unavailable, with compatible runtime parsing
+  and mocked execution covering all Lua. Installed after -WhatIf preview; previous
+  0.1.15 backup: backups/ProfitMaster-20261112-182404-301.zip. All five installed
+  hashes match source. History implementation, saved data and other addons remain
+  unchanged. No game input/reload was sent. Manual pagination also renews its own
+  bounded verification deadline, while a post-buy check retains its total deadline.
+
+0.1.17 stale offers and explicitly enabled diagnostics - 2026-11-12:
+- User reports partial success with commodity buying, but unsuccessful Buy attempts
+  leave stale offers at the top. They ask for a debug option with extensive logs.
+  Exact live event is unknown; source confirms stale quote paths deliberately kept
+  rows in 0.1.16. Price history was not a transaction/debug log.
+- Rejected/changed/expired server quotes, invalid vendor data at Buy, completed
+  commodity checks without a verified purchasable offer, empty completed item
+  searches and changed individual listings now use current-scan removal/exclusion.
+  Gold/busy/combat and user cancellation keep rows. Unknown post-success stock
+  verification still stays explicitly incomplete; no higher-price fallback exists.
+- New Diagnostics.lua: opt-in header checkbox, Debug log button, /pmaster log and
+  debug on/off commands. Separate ProfitMasterDebugDB, fixed ring of 1000 records
+  (1024 bytes each maximum), persisted only by WoW's ordinary saved-variable path.
+  Records transaction IDs/phases, expected/received quotes, quantity, gold, native
+  events, elapsed client-clock timing, result coverage and removed/kept reasons.
+  Scan/load/batch summaries supplement purchase traces. Disabled logging performs
+  no formatting/storage; enabled logging has bounded event-driven overhead.
+- Report is an on-demand snapshot in an owned inset/scroll/editbox frame, with
+  manual Ctrl+C and no CopyToClipboard, chat output or game input. It logs no
+  seller lists or raw objects; restricted values are replaced before formatting.
+- Rechecked pinned public C_AddOns.GetAddOnMetadata, CheckButton templates and
+  SimpleEditBox/ScrollFrame API. The report uses owned frames, GetNumLines and
+  ordinary scroll methods, without protected-frame inspection or keyboard hooks.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AddOnsDocumentation.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleEditBoxAPIDocumentation.lua
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_SharedXML/Shared/Button/CheckButtonTemplates.xml
+- 853 integrated + 13 diagnostics + 56 history assertions pass (922 total).
+  Checks cover queue compaction, stale-price/vendor/expiry rejection, enabled/off
+  behavior, persistence initialization, ring rollover, redaction, report snapshots,
+  focus cleanup and UI/command state. Manifest validation passed; luac unavailable,
+  with all four Lua files parsed/executed in the compatible offline runtime.
+- Installed after -WhatIf preview; previous 0.1.16 backup:
+  backups/ProfitMaster-20261112-184656-353.zip. Six installed hashes match staged
+  files. History.lua, Deals.lua, other addons and actual saved-data files were not
+  changed. No game input/reload. Native rendering and exact live failure diagnosis
+  remain for the user's enabled debug reproduction and manually copied report.
+
+0.1.18 overlapping browse vendor loading and uncertain purchase outcomes - 2026-11-13:
+- User authorized both improvements after a manually copied 0.1.17 report. Its
+  newest browse scan had 15367 rows, 16.356s to provider completion and 19.654s
+  total, 42 candidates, 5762 loaded vendor IDs, zero unavailable. No new replicate
+  scan or Auctionator debug chat was supplied. Four purchases had matching
+  completions; two had error 10 and later exact-price gold decreases. Gold alone
+  cannot establish a completed buy or explain the server-side database error.
+- Exact pinned Forever source (1.60.1.70888 / interface 16001, mirror commit
+  4cd0ab752a77164f654ccbca9d0c1fe8dafceebe) defines AuctionHouseError.DatabaseError
+  as 10. AuctionHouseDocumentation supplies the auctionID completion payload;
+  cached ItemDocumentation supplies RequestLoadItemDataByID and both native
+  item-load events. No new engine API, CVar, network scanner or hook was added.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_APIDocumentationGenerated/AuctionHouseEnumsDocumentation.lua
+- One existing loader queue now survives incoming browse pages and starts when
+  valuation drains between pages. It retains 32 outstanding/dispatch limits,
+  a roughly 4ms dispatch budget, captured vendor prices and a shared timer. Native
+  events cannot replace scheduled valuation/purchase timers. No idle polling;
+  input completion starts the final 60-second active budget. Exact-link replicate
+  loading retains its after-input timing. Auctionator and scan selection unchanged.
+- Individual internal errors remove/exclude their offer and end the quantity
+  goal, but retain the original 15-second confirmation window. Only a matching
+  completion confirms success; repeated errors do not extend it, and timeout
+  remains uncertain. No gold inference, retry, restored offer or auto-next buy.
+  Commodity purchase handling is unchanged. Diagnostics labels pending/uncertain
+  phases and records vendor_load_start receiving=true for timing comparison.
+- 937 integrated + 13 diagnostics + 56 history assertions passed offline (1006),
+  including streaming, in-flight limits, cache eviction, one request per ID,
+  no idle timer, failure cleanup, slow provider, pauses/final payload, localized
+  and synchronous errors, duplicate/unrelated/late/matching completions, preserved
+  deadline and stopped quantity goals. Manifest validation passed; luac unavailable,
+  with Lua parsed/executed by the existing compatible runtime. No in-game speed,
+  engine permissions, mailbox contents or native UI rendering was verified.
+- Installed after -WhatIf preview; 0.1.17 backup:
+  backups/ProfitMaster-20261113-104315-653.zip. All six source/installed hashes
+  match. Deals.lua, History.lua, Diagnostics.lua, other addons and actual saved
+  data were not changed; no game input/reload. User must /reload and provide a
+  new scan/purchase report for real performance and late-confirmation evidence.
+
+0.1.19 opt-in disenchant estimates and bag markers - 2026-11-13:
+- User requested a checkbox beside debugging, DE opportunities in the scan list,
+  and a top-right disenchant bag icon. User explicitly chose ALL qualifying bag
+  items, not only Profit Master purchases. Checkbox defaults off in independent
+  ProfitMasterDisenchantDB settings. See docs/profit-master.md for current behavior
+  and research/disenchant-yield-research-20261113.md for exact-client evidence.
+- Added independent baseline expected-yield data, Auctionator public material
+  pricing, 15% sale-fee reserve, all-outcome pricing, conservative exclusions and
+  exact-link Buy-time revaluation. DE labels/confirmation distinguish estimates
+  from vendor returns. Native eligibility DB2 does not establish server loot;
+  random yields and unsupported/missing data are explicit. No automatic item use.
+- Final bounded DE reconciliation uses same-scan material prices and retained
+  public metadata without repeated history, preserving fresher live stock.
+- BagMarkers uses verified Blizzard bag updates and the installed/enabled
+  Baganator851 public corner-widget API. Top-right default uses Baganator's normal
+  initial widget insertion and respects later customization; no direct settings
+  writes, copied implementation, new dependency or changes to other addon files.
+- 984 integrated +101 valuation +122 bag-widget +56 history +13 diagnostics
+  assertions passed offline (1276). Manifest6Lua validated; luac unavailable,
+  with all Lua executed by compatible mock runtime. No in-game speed, rate,
+  input/security or actual rendering verification.
+- Installed after preview; 0.1.18 backup:
+  backups/ProfitMaster-20261113-105422-560.zip. Eight source/install hashes match;
+  History.lua/Diagnostics.lua unchanged. No game input/reload or actual saved-data
+  edit. User /reload, enable checkbox, fresh scan and bag/Buy checks remain.
+
+0.1.20 local scan/render/bag performance - 2026-11-13:
+- Latest saved report showed0.1.19 loaded, but no post0.1.17 scan. User authorized
+  continued performance work; no real before/after timing claim is possible yet.
+- Publication coalescing50ms ->250ms, retaining immediate first/final/user updates;
+  clean final result no longer re-sorts. Owned controls avoid unchanged text/state
+  setters and money formatting. Twenty unchanged refreshes: zero text writes and
+  money formats, with immediate purchase locks still covered.
+- DE skips detailed-level API calls for obvious unsupported metadata and caches
+  missing materials only for known metadata/current generation. Missing item data
+  remains retryable. Bags no longer invalidate scan price caches or rebroadcast
+  Baganator native changes; disabled event/valuation paths return early. Explicit
+  mode/value updates and combat recovery remain active.
+- Precise GetTimePreciseSec budgets verified against pinned Blizzard_Console.lua
+  lines476/487 at commit4cd0ab752a77164f654ccbca9d0c1fe8dafceebe, where it budgets
+  1.5ms coroutine work. Used for4ms processing/load/stock slices and batch durations.
+  No shared debugprofilestart reset. Generated docs do not establish GetTime frame
+  caching, so that implementation detail is not claimed as verified.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_Console/Blizzard_Console.lua#L476
+- Debug adds processing stage, per-slice batch_ms and final scan_ms/provider_ms/
+  aggregate batch_ms. Provider time includes its local work; totals include waits/
+  purchase pauses; batch sum excludes other callbacks. These are client diagnostics.
+- Benchmarks outside addon: actual sort, five trials, identical output/order:
+  6000candidates120 ->25publications and175 ->37ms median total work;
+  12000candidates239 ->49 and785 ->169ms. Single large sort still7-8ms.
+  200000rows/1000links/seven alternating valuation trials preserved all outputs;
+  detailedlevel calls1000 ->750; missing-material median0.121 ->0.088s, other
+  profiles approximately unchanged. Native API/FPS/network costs are not modeled.
+- 990 integrated +112 DE +304 bags +56 history +13 diagnostics passed (1475).
+  Includes frozen frame clock/advancing precise clock, burst coalescing, immediate
+  final/purchase UI, cache generations/eviction, native bag events and combat.
+  Manifest6Lua validated; luac unavailable, compatible mocked Lua5.1 execution.
+- Installed after preview; previous0.1.19 backup:
+  backups/ProfitMaster-20261113-111924-865.zip. Eight installed/source hashes match.
+  Deals.lua/History.lua/Diagnostics.lua, other addon files, actual saved data and
+  game input unchanged. User /reload and newdebugscan required for real timing.
+
+0.1.21 fresh timings, in-scan Buy and continuously updated bag marks - 2026-11-13:
+- Fresh0.1.20 reports:14195rows/77candidates16.130s (provider15.258s,batches424ms),
+  14142rows/64candidates16.170s (provider15.251s,batches434ms), no unavailable rows.
+  First candidates240/243ms, loads382/320ms. Disabled Buy was a provider gate,
+  not a requirement to finish local valuation. Total remains mostly browse wait.
+- Auctionator346 has no supported pause API and resets its browse buffer when
+  specific queries cause BROWSE_RESULTS_UPDATED. Exact pinned Blizzard browse UI
+  retains browse and item-search stores concurrently and requests further pages
+  from the existing browse query. Added one small native paced BrowseScanner for
+  Profit Master's browse button. Dependency/pricing still Auctionator; external
+  scans still supported, no Auctionator setting or field mutation.
+  https://github.com/Gethe/wow-ui-source/blob/4cd0ab752a77164f654ccbca9d0c1fe8dafceebe/Interface/AddOns/Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseBrowseResultsFrame.lua
+- Buy clickable on published rows. It pauses future owned pages and local CPU
+  slices, queues only read-only verification for readiness, and retains manual
+  confirmation. In-flight pages/load data still captured. Replicate snapshot can
+  coexist; external browse checks wait for safe release. Queued reads30s, sent
+  checks15s, no callback buys. Cancel/success/terminal results resume discovery;
+  manual partial More stage15s bounded, tab leave stops owned discovery as partial,
+  AHclose stops both flows. Pager has one bounded outstanding-request watchdog.
+- Final DE reconciliation revalues cheapest perbaseID/exactlink, preserving raw
+  history and live-stock precedence.10000repeated offers =>one final key read
+  (10001total) rather than another10000row pass, same cheapest winning price.
+- Shared Disenchant.Icon uses verified C_Spell.GetSpellTexture(13262), first return
+  only, public/nil checks; no incorrectfixedgenericEnchant fallback. Pinned
+  SpellDocumentation and Shared/SpellFlyout.lua confirm signature/caller.
+- All bag gear recommendations stay event-driven whileenabled, using verified
+  public RegisterForDBUpdate plus native bag events and filtered metadata readiness.
+  Baganator returns supported nil=pending to its own API.1000irrelevantload events
+  do zero reads/valuations/refreshes. No new bag polling or actual item use.
+- 1031integrated +116DE +346bags +96pager +56history +13debug passed (1658).
+  Native/throttle/queued/stale/synchronous lifecycle and terminal resume covered;
+  all7Lua manifest validated, compatible mocked Lua5.1 execution (luac absent).
+  Native coexistence, exact icon drawing and real speed still need gameQA.
+- Installed after preview; previous0.1.20 backup:
+  backups/ProfitMaster-20261113-132135-864.zip. Nine source/install hashes match;
+  Deals/History/Diagnostics unchanged. No other addon files, actual saved data,
+  game input or reload. User must /reload/use PMScan and inspect early Buy/bags.
+
+0.1.22 icon-only vendor/DE bag advice - 2026-11-13:
+- User requested vendor-sale bag icon when selling beats DE, then corrected the
+  proposedlabel: icons only, no SELL orDE text on bag slots. AH DE row text remains.
+- Disenchant.Recommendation chooses'vendor'/'disenchant'/nil from complete supported
+  perunit estimates. Existing15% fee reserve; signedadvantage>=3c; ties/unknown/
+  unsupported/restricted values unmarked. No fallback to selling when DE unknown.
+  Samecheckbox governsalleligibleinventory, not onlypurchases; nointactAHcomparison.
+- Native+Baga one14px top-rightregion, actualspell13262icon vs verified
+  bags-junkcoin atlas (pinnedMainlineContainerFrame.xml139, CamelotbaseUI). No new
+  labels/inputhandlers/timers/junkflags/autoactions. Existing Bagaid/location kept.
+  Stylesupdateonlychanged; DE switchesresetUV; nil-to-readytextures recover on
+  existingregions. Thisalsoaddresses thelateiconissuefromtheimprovementreview.
+- 1031integrated +148DE +424bags +96pager +56history +13debug =1768 offline
+  assertionspassed. SevenLua manifestsvalidated; luacabsent, compatible mocked
+  Lua5.1 execution. Boundaries,unknowns,stacks,styles,readiness,inputcovered.
+  Actualnativerendering remains gameQA; no WoWcontrolorprobes.
+- Installed afterpreview; previous0.1.21 backup:
+  backups/ProfitMaster-20261113-134254-103.zip. Nineinstalled/sourcehashesmatch.
+  Maincontroller/pager/Deals/History/Diagnostics unchanged; nootheraddonfiles,
+  actualSavedVariables,gameinputor/reload changed. User'snextreloadpicksthisup.
+
+0.1.23 independent DE opt-out during automatic scanning - 2026-11-13:
+- User initially associated disabling DE with disabling debug, then clarified an
+  automatic scan was probably active. Separate DB/handlers have no debug condition;
+  DE had a blanket scan-busy UI/callback lock. Pinned checkbox template/hit targets
+  show no expanded-hitbox or script linkage, so no layout rewrite was justified.
+- DE-off now works during automatic/manual scans independently of debug; DE-on
+  waits for idle. Active selected checks/quotes/purchases/stock flows retain their
+  mode lock. Internal best map and visible results are cleaned consistently:
+  known vendor-profitable rows convert, DE-only rows removed, no later resurrection.
+  Discovery continues vendor-only; no additional query/restart/input/timer.
+- 1076integrated +148DE +424bags +96pager +56history +13debug passed (1813),
+  covering bothdebugstates, savedpreferences, busyscanoff,onreject,publication,
+  conversions/removals,completion and quoteauthorization. SevenLua validated;
+  luac absent, existing compatible runtime parsed/executed allsource. GameQA pending.
+- Installed afterpreview; old0.1.22 backup:
+  backups/ProfitMaster-20261113-141647-437.zip. Ninehashesmatch. Onlymaincontroller,
+  TOC/READMEshipchanges; otheraddons, saveddata, gameinput/reload unchanged.
+Settings/minimap and outside-AH idle audit (2026-11-14)
+---------------------------------------------------
+Read-only executable metadata: Forever1.60.1.70938 / interface16001. Primary
+Blizzard source pinned at bebcb6bf309cf41b41bd74f8ca651e6a105b2676. Downloaded
+relevant sources to scratch/profit-master-settings-source, outside shipped addons:
+  Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleFrameAPIDocumentation.lua
+  Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleButtonAPIDocumentation.lua
+  Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleRegionAPIDocumentation.lua
+  Interface/AddOns/Blizzard_Minimap/Camelot/Minimap.lua
+  Interface/AddOns/Blizzard_Minimap/Camelot/MinimapTrackingButton.lua
+  Interface/AddOns/Blizzard_Minimap/Blizzard_Minimap.toc
+Base: https://raw.githubusercontent.com/Gethe/wow-ui-source/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/
+
+Generated widget docs confirm movable/clamped frames, native drag methods,
+RegisterForClicks, SetUserPlaced, effective scale and region coordinate returns.
+GetCenter/GetLeft/GetTop may be missing/restricted and scale may be restricted;
+validate all values before arithmetic. Only owned nonprotected frames move.
+Native ClickToDragMixin in cached70938 SharedUIPanelTemplates.lua:1522-1535 uses
+RegisterForDrag/StartMoving/StopMovingOrSizing. CheckButtonTemplates.xml and
+InputBoxTemplates.xml are loaded by SharedXML; these are the same native controls
+already used by ProfitMaster. Minimap TOC explicitly loads Camelot minimap code.
+Gold-coin atlas bags-junkcoin reuses the previously checked native bag advice art.
+
+Installed Auctionator346 Source/Utilities/EventBusMixin.lua exposes
+Unregister(listener,eventNames) for a previously registered own listener. The
+modern public RegisterForDBUpdate callback does not expose an unsubscribe token;
+its once-registered callback must become an immediate inactive guard. Existing
+bag post-hooks are also nonremovable, so they guard before any item/cache work.
+No Auctionator/Blizzard state or other installed addon files are changed.

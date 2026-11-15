@@ -1,0 +1,9 @@
+/data/
+/backups/
+/dist/
+/scratch/
+__pycache__/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

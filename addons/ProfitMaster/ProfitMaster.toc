@@ -1,0 +1,17 @@
+## Interface: 16001
+## Title: Profit Master
+## Notes: Vendor deals and 30-day observed auction prices alongside Auctionator.
+## Author: Runev
+## Version: 0.1.34
+## Dependencies: Auctionator
+## SavedVariables: ProfitMasterDB, ProfitMasterDebugDB, ProfitMasterDisenchantDB
+
+History.lua
+Disenchant.lua
+Deals.lua
+Diagnostics.lua
+BagMarkers.lua
+BrowseScanner.lua
+OwnedAuctions.lua
+Settings.lua
+ProfitMaster.lua
