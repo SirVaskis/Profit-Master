@@ -36,10 +36,11 @@ def _name_part(byte):
 
 
 class _Parser:
-    def __init__(self, data):
+    def __init__(self, data, allowed_roots):
         self.data = data
         self.pos = 3 if data.startswith(b"\xef\xbb\xbf") else 0
         self.nodes = 0
+        self.allowed_roots = allowed_roots
 
     def fail(self, message):
         raise SavedVariablesError(f"{message} at byte {self.pos}")
@@ -222,7 +223,7 @@ class _Parser:
         self.space()
         while self.pos < len(self.data):
             name = self.name()
-            if name not in ALLOWED_ROOTS:
+            if name not in self.allowed_roots:
                 self.fail("Unexpected SavedVariables root")
             if name in result:
                 self.fail("Duplicate SavedVariables root")
@@ -238,7 +239,7 @@ class _Parser:
         return result
 
 
-def parse_saved_variables(data: bytes) -> dict:
+def parse_saved_variables(data: bytes, *, allowed_roots=ALLOWED_ROOTS) -> dict:
     """Return allowed roots as dictionaries (including empty tables) or None.
 
     Missing roots are omitted. Explicit nil table values are represented by None;
@@ -249,4 +250,4 @@ def parse_saved_variables(data: bytes) -> dict:
         raise TypeError("SavedVariables input must be bytes")
     if len(data) > MAX_INPUT_BYTES:
         raise SavedVariablesError("SavedVariables input exceeds the 64 MiB limit")
-    return _Parser(data).parse()
+    return _Parser(data, frozenset(allowed_roots)).parse()

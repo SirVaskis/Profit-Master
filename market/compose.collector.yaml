@@ -1,0 +1,19 @@
+name: profit-market-collector
+
+# Optional Linux-container client. Windows users can run the standalone EXE.
+services:
+  collector:
+    build:
+      context: ..
+      dockerfile: market/Dockerfile
+      target: collector
+    volumes:
+      - ${SAVED_VARIABLES_DIR:?Set the directory containing the addon saves}:/saved:ro
+      - ${COLLECTOR_CONFIG:?Set an absolute client config path}:/config/client.json:ro
+      - collector_state:/data
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+volumes:
+  collector_state:

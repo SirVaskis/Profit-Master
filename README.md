@@ -1,7 +1,7 @@
 # Profit Master
 
 An Auction House addon for **WoW Forever**, using **Auctionator** as its required
-dependency. Current source version: **0.2.1** (Interface 16001).
+dependency. Current source version: **0.2.2** (Interface 16001).
 
 Profit Master finds auctions below vendor value, estimates disenchant proceeds,
 and verifies live listings before a player confirms a purchase. It includes
@@ -18,6 +18,9 @@ Version 0.2.1 fixes a preparation handoff that could wait for an event already
 received, selects affordable variants, and validates large item books in bounded
 time slices. [Performance review and simulations](docs/profit-master-performance-20261115.md)
 separate measured offline behavior from the pending live capture.
+
+Version 0.2.2 adds item category metadata and successful full-scan timestamps for
+the external market archive, reusing existing item-info results and daily storage.
 
 ## Install
 
@@ -74,6 +77,12 @@ adjust it for your installation. Installation backs up the existing named addon.
 The helpers never control or reload WoW.
 
 ## Market history
+
+The external [Windows uploader, PostgreSQL receiver and Grafana dashboard](market/README.md)
+support both Profit Master and the supplied ProfitTop 0.1.13 history format.
+The server has a Docker Compose handoff; the Windows collector is a standalone
+console application with a durable upload queue. This does not add dependencies
+or network calls to either addon.
 
 See [SQL history usage](docs/profit-master-sql.md) for archive/import commands and
 queries. Historical quote observations are asking prices, not completed sales.

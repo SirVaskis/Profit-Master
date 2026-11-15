@@ -129,6 +129,7 @@ check(legacy.low == 1 and legacy.high == 10 and legacy.last == 10 and legacy.sam
     "full-distribution capture preserves daily low/high/latest/listing counts")
 local saved, _, exactStep = close(exact, true)
 local mean = exact.bucket.trimmedMeans["replicate:100"]
+check(exact.bucket.scanTimes[now] == true, "completed full scans retain their UTC source timestamps independently of daily means")
 check(saved == 1 and mean.mean == 5.5 and mean.samples == 10 and mean.retained == 8,
     "ten equally weighted units trim exactly one at each end")
 check(mean.at == now and mean.sum == 5.5 and mean.count == 1
@@ -307,6 +308,12 @@ history.RememberOpportunity({ itemID = 1, itemKey = browse(1, 50, 1, "SECRET").i
 check(history.QuickKeys()[1].itemID == 350, "restricted key fields are skipped before key construction")
 history.Initialize(quickSaved)
 check(#history.QuickKeys() == 300, "learned opportunities survive SavedVariables initialization")
+history.RecordVendor("item:2589", "Linen Cloth", 13, now, 7, 5, "Trade Goods", "Cloth")
+check(quickSaved.items[2589].classID == 7 and quickSaved.items[2589].subclassID == 5
+    and quickSaved.items[2589].subclassName == "Cloth", "category fields reuse verified vendor item metadata")
+history.RecordVendor("item:2589", "Linen Cloth", 13, now, "SECRET", 5, "SECRET", "Cloth")
+check(quickSaved.items[2589].classID == 7 and quickSaved.items[2589].className == "Trade Goods",
+    "restricted category fields are skipped without discarding known metadata")
 local future = { version = 99, items = {}, markets = {}, marker = "preserve" }
 check(history.Initialize(future) == nil and future.marker == "preserve" and future.version == 99, "unknown database version is preserved and safely disabled")
 history.RecordVendor("item:5", "No write", 50, now)

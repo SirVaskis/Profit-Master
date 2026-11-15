@@ -1,0 +1,7 @@
+{
+  "server_url": "https://market.example.com",
+  "token": "REPLACE_WITH_YOUR_UPLOAD_TOKEN_OF_AT_LEAST_32_CHARACTERS",
+  "game_root": "C:/Program Files (x86)/World of Warcraft/_forever_",
+  "saved_files": [],
+  "poll_seconds": 5
+}

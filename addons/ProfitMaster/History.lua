@@ -111,7 +111,7 @@ function history.RememberOpportunity(deal)
     if count > 300 and oldest then db.quickItems[oldest] = nil end
 end
 
-function history.RecordVendor(link, name, price, observedAt)
+function history.RecordVendor(link, name, price, observedAt, classID, subclassID, className, subclassName)
     if not db or (issecretvalue and (issecretvalue(link) or issecretvalue(name)))
         or type(link) ~= "string" or type(name) ~= "string" or not Number(price, 0) then return end
     local id = tonumber(link:match("item:(%d+)"))
@@ -124,6 +124,15 @@ function history.RecordVendor(link, name, price, observedAt)
     if not Number(item.vendorPrice, 0) then vendorCount = vendorCount + 1 end
     item.name, item.vendorLink, item.vendorPrice = name, link, price
     item.vendorSeenAt = at
+    -- Reuse the existing GetItemInfo result: no extra item loads or catalog scan.
+    if Number(classID, 0) and Number(subclassID, 0)
+        and classID == math.floor(classID) and subclassID == math.floor(subclassID)
+        and not (issecretvalue and (issecretvalue(className) or issecretvalue(subclassName)))
+        and type(className) == "string" and className ~= ""
+        and type(subclassName) == "string" and subclassName ~= "" then
+        item.classID, item.subclassID = classID, subclassID
+        item.className, item.subclassName = className, subclassName
+    end
 end
 
 function history.BeginScan(source, observedAt, collectMeans)
@@ -239,6 +248,7 @@ function history.Finish(scan, complete)
         local bucket = scan.bucket
         base = bucket.trimmedMeans
         if (base ~= nil and type(base) ~= "table")
+            or (bucket.scanTimes ~= nil and type(bucket.scanTimes) ~= "table")
             or (bucket.trimmedMethod ~= nil and bucket.trimmedMethod ~= "unit-weighted-trimmed")
             or (bucket.trimmedTail ~= nil and bucket.trimmedTail ~= 0.1)
             or (bucket.trimmedScans ~= nil and (not Number(bucket.trimmedScans, 0)
@@ -304,6 +314,8 @@ function history.Finish(scan, complete)
                 else
                     if scan.meanOwner ~= db or math.floor(scan.at / DAY) < math.floor(time() / DAY) - 29 then return Done(0) end
                     scan.bucket.trimmedMeans = rollup
+                    scan.bucket.scanTimes = scan.bucket.scanTimes or {}
+                    scan.bucket.scanTimes[scan.at] = true
                     scan.bucket.trimmedScans = (scan.bucket.trimmedScans or 0) + 1
                     scan.bucket.trimmedMethod, scan.bucket.trimmedTail = "unit-weighted-trimmed", 0.1
                     return Done(count)

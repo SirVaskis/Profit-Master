@@ -1,4 +1,4 @@
-Profit Master 0.2.1 - preparation handoff and bounded price checks
+Profit Master 0.2.2 - market categories and scan timestamps
 
 Requires WoW Forever (Interface 16001) and Auctionator.
 Auctionator is a required dependency in the TOC, not an optional integration.
@@ -6,7 +6,15 @@ Affected APIs source-checked against Forever build 1.60.1.70938 and Auctionator 
 This version is not yet tested in-game. Auctionator integration uses internal scan events and its
 full-scan controller; future Auctionator changes may require an update.
 
-0.2.1 fixes - use /reload when ready
+0.2.2 - use /reload when ready
+- Saves AH item class/subclass IDs and names alongside existing vendor metadata.
+  Reuses the same GetItemInfo call; it adds no item loads or AH searches.
+  The external market collector uses these categories for both addon feeds.
+  Older items remain unclassified until observed again; no name-based guessing.
+- Retains successful full-distribution scan timestamps for the external archive.
+  Price history remains daily rollups; old per-scan prices cannot be recreated.
+
+0.2.1 fixes
 - Clicking while preparation is processing an already-received reply now hands
   that book to the purchase check. It does not wait for another server event.
 - Preparation chooses an affordable variant instead of a larger unaffordable

@@ -8,3 +8,10 @@ __pycache__/
 *.tmp
 .DS_Store
 Thumbs.db
+/.venv-market/
+/market/.local/
+/market/.env
+/market/client-config.json
+/market/build/
+/market/dist/
+*.spec

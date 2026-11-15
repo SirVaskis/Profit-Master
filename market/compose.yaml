@@ -1,0 +1,90 @@
+name: profit-market
+
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: market_admin
+      POSTGRES_PASSWORD: ${ADMIN_PASSWORD:?Generate market/.env first}
+      POSTGRES_DB: profit_market
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market_admin -d profit_market"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: market/Dockerfile
+      target: receiver
+    entrypoint: ["python", "-m", "market.bootstrap"]
+    command: []
+    environment:
+      ADMIN_DATABASE_URL: postgresql://market_admin:${ADMIN_PASSWORD}@postgres:5432/profit_market
+      WRITER_PASSWORD: ${WRITER_PASSWORD:?Missing writer password}
+      READER_PASSWORD: ${READER_PASSWORD:?Missing reader password}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?Missing Grafana database password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  receiver:
+    build:
+      context: ..
+      dockerfile: market/Dockerfile
+      target: receiver
+    environment:
+      DATABASE_URL: postgresql://market_writer:${WRITER_PASSWORD}@postgres:5432/profit_market
+      UPLOAD_TOKEN: ${UPLOAD_TOKEN:?Missing upload token}
+      UPLOAD_CONTRIBUTOR: pilot
+    ports:
+      - "127.0.0.1:${API_PORT:-8787}:8787"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    environment:
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Missing Grafana admin password}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY:?Missing persistent Grafana secret}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS:-false}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: postgres:5432
+      GF_DATABASE_NAME: profit_grafana
+      GF_DATABASE_USER: market_grafana
+      GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
+      GF_DATABASE_SSL_MODE: disable
+      MARKET_DB_HOST: postgres:5432
+      MARKET_READER_PASSWORD: ${READER_PASSWORD}
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  grafana_data:

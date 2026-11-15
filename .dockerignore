@@ -1,0 +1,13 @@
+*
+!market/
+!market/**
+!tools/
+!tools/profit_master_saved.py
+market/.local
+market/.env
+market/client-config.json
+market/build
+market/dist
+market/tests
+market/__pycache__
+tools/__pycache__

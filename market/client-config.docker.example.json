@@ -1,0 +1,6 @@
+{
+  "server_url": "https://market.example.com",
+  "token": "REPLACE_WITH_YOUR_UPLOAD_TOKEN_OF_AT_LEAST_32_CHARACTERS",
+  "saved_files": ["/saved/ProfitMaster.lua", "/saved/ProfitTop.lua"],
+  "poll_seconds": 5
+}

@@ -1,0 +1,224 @@
+{
+  "uid": "profit-market",
+  "title": "WoW Market - Item trends",
+  "schemaVersion": 39,
+  "version": 2,
+  "editable": false,
+  "tags": [
+    "market",
+    "prices"
+  ],
+  "timezone": "utc",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# WoW Market\nAuction average trends | Scan times in UTC\n\n[Item charts](/d/profit-market?${__url_time_range}&${__all_variables}&kiosk) | [Compare materials](/d/profit-market-compare?${__url_time_range}&${__all_variables}&kiosk) | [24H](/d/profit-market?from=now-24h&to=now&${__all_variables}&kiosk) | [7D](/d/profit-market?from=now-7d&to=now&${__all_variables}&kiosk) | [30D](/d/profit-market?from=now-30d&to=now&${__all_variables}&kiosk)"
+      }
+    },
+    {
+      "id": 2,
+      "title": "${item:text}",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "profitmarket-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "repeat": "item",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "profitmarket-postgres"
+          },
+          "rawQuery": true,
+          "rawSql": "SELECT observed_at AS time, SUM(average_copper*COALESCE(scan_count,1))/SUM(COALESCE(scan_count,1))/10000.0 AS value, average_method||CASE WHEN variant LIKE 'replicate:%' OR variant ~ '^[0-9]+:0:0:0$' THEN '' ELSE ' / '||variant END AS metric FROM reporting.average_history WHERE market_key IN (${market:sqlstring}) AND COALESCE(class_id,-1) = ${category:sqlstring}::integer AND (${subcategory:sqlstring} = '-1' OR subclass_id = ${subcategory:sqlstring}::integer) AND metric=${method:sqlstring} AND item_id::text = ANY(ARRAY[${item:sqlstring}]::text[]) AND $__timeFilter(observed_at) GROUP BY observed_at,item_id,item_name,average_method,variant ORDER BY observed_at",
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "description": "Only saved averages appear. Daily trimmed averages weight each completed full scan equally. Sampled listing averages are separate. Timestamps are UTC. Older daily rollups retain their latest observation time.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:g",
+          "decimals": 4,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#14b8a6"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "diffperc"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "market",
+        "label": "Realm / market",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "profitmarket-postgres"
+        },
+        "query": "SELECT DISTINCT market_key FROM reporting.price_history ORDER BY 1",
+        "definition": "SELECT DISTINCT market_key FROM reporting.price_history ORDER BY 1",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": {
+          "text": "PvE",
+          "value": "PvE"
+        }
+      },
+      {
+        "name": "category",
+        "label": "Category",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "profitmarket-postgres"
+        },
+        "query": "SELECT name AS __text,class_id::text AS __value FROM reporting.ah_categories ORDER BY CASE WHEN class_id=7 THEN 0 ELSE 1 END,name",
+        "definition": "SELECT name AS __text,class_id::text AS __value FROM reporting.ah_categories ORDER BY CASE WHEN class_id=7 THEN 0 ELSE 1 END,name",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": {
+          "text": "Trade Goods",
+          "value": "7"
+        }
+      },
+      {
+        "name": "subcategory",
+        "label": "Subcategory",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "profitmarket-postgres"
+        },
+        "query": "SELECT 'All' AS __text,'-1' AS __value UNION ALL SELECT DISTINCT subclass_name,subclass_id::text FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND class_id=${category:sqlstring}::integer AND subclass_name IS NOT NULL ORDER BY 1",
+        "definition": "SELECT 'All' AS __text,'-1' AS __value UNION ALL SELECT DISTINCT subclass_name,subclass_id::text FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND class_id=${category:sqlstring}::integer AND subclass_name IS NOT NULL ORDER BY 1",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": {
+          "text": "All",
+          "value": "-1"
+        }
+      },
+      {
+        "name": "method",
+        "label": "Average",
+        "type": "custom",
+        "query": "Daily trimmed average : trimmed_mean,Sampled listing average : listing_vwap",
+        "current": {
+          "text": "Daily trimmed average",
+          "value": "trimmed_mean"
+        },
+        "options": [
+          {
+            "text": "Daily trimmed average",
+            "value": "trimmed_mean",
+            "selected": true
+          },
+          {
+            "text": "Sampled listing average",
+            "value": "listing_vwap",
+            "selected": false
+          }
+        ],
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "page",
+        "label": "Page",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "profitmarket-postgres"
+        },
+        "query": "SELECT n::text FROM generate_series(1,GREATEST(1,(SELECT (count(DISTINCT item_id)+11)/12 FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND COALESCE(class_id,-1) = ${category:sqlstring}::integer AND (${subcategory:sqlstring} = '-1' OR subclass_id = ${subcategory:sqlstring}::integer)))::integer) n",
+        "definition": "SELECT n::text FROM generate_series(1,GREATEST(1,(SELECT (count(DISTINCT item_id)+11)/12 FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND COALESCE(class_id,-1) = ${category:sqlstring}::integer AND (${subcategory:sqlstring} = '-1' OR subclass_id = ${subcategory:sqlstring}::integer)))::integer) n",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": {
+          "text": "1",
+          "value": "1"
+        }
+      },
+      {
+        "name": "item",
+        "label": "Items",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "profitmarket-postgres"
+        },
+        "query": "WITH items AS (SELECT COALESCE(max(item_name),'Item '||item_id::text) AS name,item_id::text AS id FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND COALESCE(class_id,-1) = ${category:sqlstring}::integer AND (${subcategory:sqlstring} = '-1' OR subclass_id = ${subcategory:sqlstring}::integer) GROUP BY item_id ORDER BY 1,item_id LIMIT 12 OFFSET (GREATEST(1,${page:sqlstring}::integer)-1)*12) SELECT name AS __text,id AS __value FROM items UNION ALL SELECT 'Awaiting scanned averages','-1' WHERE NOT EXISTS(SELECT 1 FROM items)",
+        "definition": "WITH items AS (SELECT COALESCE(max(item_name),'Item '||item_id::text) AS name,item_id::text AS id FROM reporting.price_history WHERE market_key IN (${market:sqlstring}) AND COALESCE(class_id,-1) = ${category:sqlstring}::integer AND (${subcategory:sqlstring} = '-1' OR subclass_id = ${subcategory:sqlstring}::integer) GROUP BY item_id ORDER BY 1,item_id LIMIT 12 OFFSET (GREATEST(1,${page:sqlstring}::integer)-1)*12) SELECT name AS __text,id AS __value FROM items UNION ALL SELECT 'Awaiting scanned averages','-1' WHERE NOT EXISTS(SELECT 1 FROM items)",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "options": [],
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  }
+}

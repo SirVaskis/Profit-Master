@@ -39,13 +39,13 @@ end
 local function VendorInfo(reference, itemCache)
     local item = itemCache and itemCache[reference]
     if item == nil then
-        local name, returnedLink, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(reference)
+        local name, returnedLink, _, _, _, className, subclassName, _, _, _, sellPrice, classID, subclassID = C_Item.GetItemInfo(reference)
         if issecretvalue and (issecretvalue(name) or issecretvalue(returnedLink) or issecretvalue(sellPrice)) then
             return nil
         end
         local link = type(reference) == "number" and ("item:" .. reference) or reference
         if type(name) == "string" and type(sellPrice) == "number" and addon.History then
-            addon.History.RecordVendor(link, name, sellPrice)
+            addon.History.RecordVendor(link, name, sellPrice, nil, classID, subclassID, className, subclassName)
         end
         item = type(name) == "string" and type(sellPrice) == "number"
             and { name = name, sellPrice = sellPrice, link = returnedLink or link,
