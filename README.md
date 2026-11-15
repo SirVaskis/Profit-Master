@@ -1,22 +1,30 @@
 # Profit Master
 
 An Auction House addon for **WoW Forever**, using **Auctionator** as its required
-dependency. Current source version: **0.1.34** (Interface 16001).
+dependency. Current source version: **0.2.0** (Interface 16001).
 
 Profit Master finds auctions below vendor value, estimates disenchant proceeds,
 and verifies live listings before a player confirms a purchase. It includes
 quantity goals, bag advice, minimap settings, diagnostics and market-history
 collection. Safe disenchant mode uses the supported minimum material outcome.
 
+Version 0.2.0 adds a Quick scan of up to 300 learned item keys and prepares up to
+20 affordable item listings while the tab is idle. A prepared **Buy 1** row buys
+one verified auction on that click; an unprepared row loads a confirmation.
+Settings can restore confirmation for prepared rows. Commodity quantities keep
+their existing server-quote confirmation. See [the comparison and checks](docs/profit-master-comparison-20261115.md).
+
 ## Install
 
 Install Auctionator, then copy `addons/ProfitMaster` into your client's
 `Interface/AddOns` directory. Restart the client for a first installation;
-`/reload` loads later updates to the existing addon files.
+`/reload` loads later updates to existing addon files. **Restart the client for
+the 0.2.0 update**, which adds files to the manifest.
 
 Open the **Profit Master** Auction House tab, or use `/pmaster`. The minimap
 button and `/pmaster settings` open settings. `/pmaster log` opens the manual,
 copyable diagnostic report.
+Use **Quick scan** or `/pmaster quick` after a full scan has learned opportunities.
 
 See [the addon README](addons/ProfitMaster/README.txt) for usage and limitations.
 
@@ -49,7 +57,8 @@ py -3 tools/Run-LuaChecks.py 'C:\path\to\lua51.dll' tools/Test-ProfitMaster.lua
 ```
 
 Run the remaining `tools/Test-ProfitMaster*.lua` suites the same way. The initial
-source push passed **4,288 distinct Lua assertions** and **31 Python tests**.
+source push passed **4,288 distinct Lua assertions** and **31 Python tests**;
+the 0.2.0 comparison document records the new validation results.
 Repeated main-harness checks in wrappers are counted once. Offline checks do not
 establish in-game API permissions, rendering or latency. Historical benchmarks
 require their specified baseline directories and are not standalone test suites.

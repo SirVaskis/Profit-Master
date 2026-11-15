@@ -2,6 +2,7 @@
 /backups/
 /dist/
 /scratch/
+/compare/
 __pycache__/
 *.log
 *.tmp

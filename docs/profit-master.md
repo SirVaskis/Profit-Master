@@ -1,5 +1,10 @@
 # Profit Master
 
+Current build: **0.2.0**. The scan/buy merge, checks and restart checklist are in
+[the 2026-11-15 comparison](profit-master-comparison-20261115.md). Development and
+the connected Git checkout now live at `C:\src\Profit-Master`; older entries below
+record their original build dates and limitations.
+
 Recovered chat: **Design Profit Master Addon**,
 `6af5c489-1a64-83eb-a9cd-9cd7ffafa8d9`. Its final user instruction was
 "Okay, let's build it."

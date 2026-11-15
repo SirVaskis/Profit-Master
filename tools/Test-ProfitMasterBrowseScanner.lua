@@ -185,4 +185,46 @@ advance(0)
 check(completed == 2 and #snapshot == 20 and not scanner.Active() and activeTimers() == 0,
     "bounded synchronous page dispatch eventually completes without recursion or idle timers")
 C_AuctionHouse.SendBrowseQuery, C_AuctionHouse.RequestMoreBrowseResults = originalSend, originalMore
+
+local batches, keys = {}, {}
+for id = 1, 350 do keys[id] = row(id).itemKey end
+C_AuctionHouse.SearchForItemKeys = function(batch)
+    batches[#batches + 1], ready = batch, false
+end
+ready, full = true, true
+check(scanner.StartKeys(keys, rows, done, failure), "Quick scan starts from known item keys")
+check(#batches == 1 and #batches[1] == 50, "Quick scan sends at most fifty keys in its first query")
+keys[1].itemID = 9999
+check(batches[1][1].itemID == 1, "caller mutation cannot change the dispatched watchlist snapshot")
+for batch = 1, 6 do
+    browse = { row((batch - 1) * 50 + 1) }
+    event("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+    if batch < 6 then
+        check(#batches == batch, "next batch waits for the native channel")
+        scanner.Pause()
+        ready = true
+        event("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+        check(#batches == batch, "buying can pause the gap between Quick scan batches")
+        scanner.Resume()
+        check(#batches == batch + 1 and #batches[batch + 1] == 50, "resume sends only the next fifty-key batch")
+    end
+end
+check(#batches == 6 and #snapshot == 6 and not scanner.Active(), "Quick scan caps coverage at 300 keys and releases all work")
+ready, full = true, true
+scanner.StartKeys({ row(1).itemKey }, rows, done, failure)
+local beforeFailures = failed
+browse = { row(900) }
+event("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+check(failed == beforeFailures + 1 and not scanner.Active(), "a foreign query cannot be accepted as watchlist coverage")
+ready = true
+scanner.StartKeys({ row(1).itemKey }, rows, done, failure)
+browse = {}
+beforeFailures = failed
+event("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+check(scanner.Active() and failed == beforeFailures, "first empty watchlist reply is retried instead of deleting candidates")
+ready = true
+event("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+event("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+check(failed == beforeFailures + 1 and not scanner.Active(), "two empty replies leave coverage explicitly uncertain")
+check(activeTimers() == 0 and not next(eventFrame.events), "Quick scan leaves no background timer or event listeners")
 print("Profit Master browse scanner: " .. checks .. " offline assertions passed (Lua 5.1).")

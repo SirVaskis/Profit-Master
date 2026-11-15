@@ -294,6 +294,56 @@ local function Label(parent, x, y, width, template)
     return text
 end
 
+local function StartBrowse(keys)
+    addon.Disenchant.ResetCache()
+    scanStartedAt, scanLabel = time(), keys and "Profit Master Quick scan" or "Profit Master browse scan"
+    Trace("scan_start", { source = keys and "quick" or "profitmaster_browse", keys = keys and #keys })
+    local work = ProcessScan({}, true, true, keys)
+    work.ownedBrowse, work.latestRows = true, {}
+    local onRows = function(rows)
+        if scanWork ~= work then return end
+        work.latestRows = rows
+        work.Feed(rows)
+        if not work.paused then
+            ScanProgress(0, "Received " .. #rows .. " rows - Buy pauses discovery")
+        end
+    end
+    local onComplete = function(rows)
+        if scanWork == work then work.Complete(rows) end
+    end
+    local onFailed = function(reason)
+        if scanWork ~= work then return end
+        StopScanWork(reason == "Auction House closed." and "cancelled" or "failed")
+        scanBusy = false
+        ScanProgress(0, "Browse scan stopped - partial results kept")
+        if not (pendingPurchase or verifying or quote) then
+            Status(reason .. " Partial results kept; Buy still verifies each offer.")
+        end
+        if queuedSearch and reason ~= "Auction House closed." then TryQueuedSearch() end
+        Refresh()
+    end
+    local started
+    if keys then started = addon.BrowseScanner.StartKeys(keys, onRows, onComplete, onFailed)
+    else started = addon.BrowseScanner.Start(onRows, onComplete, onFailed) end
+    if not started then
+        StopScanWork("failed")
+        scanBusy = false
+        Status("Auction House is not ready to start browsing. Try Scan again when ready.")
+    end
+end
+
+local function StartQuickScan()
+    if recheck then ClearLive() end
+    if not houseOpen or pendingPurchase or verifying or quote or IsBusy() then return end
+    local keys = addon.History.QuickKeys()
+    if #keys == 0 then
+        Status("Run a full scan first to learn profitable items for Quick scan.")
+        return
+    end
+    StartBrowse(keys)
+    Refresh()
+end
+
 local function StartScan()
     if recheck then ClearLive() end
     if not houseOpen or pendingPurchase or verifying or quote then
@@ -332,36 +382,7 @@ local function StartScan()
         ClearLive()
         page = 1
         if scan == browse and addon.BrowseScanner then
-            addon.Disenchant.ResetCache()
-            scanStartedAt, scanLabel = time(), "Profit Master browse scan"
-            Trace("scan_start", { source = "profitmaster_browse" })
-            local work = ProcessScan({}, true, true)
-            work.ownedBrowse, work.latestRows = true, {}
-            local started = addon.BrowseScanner.Start(function(rows)
-                if scanWork ~= work then return end
-                work.latestRows = rows
-                work.Feed(rows)
-                if not work.paused then
-                    ScanProgress(0, "Received " .. #rows .. " rows - Buy pauses discovery")
-                end
-            end, function(rows)
-                if scanWork == work then work.Complete(rows) end
-            end, function(reason)
-                if scanWork ~= work then return end
-                StopScanWork(reason == "Auction House closed." and "cancelled" or "failed")
-                scanBusy = false
-                ScanProgress(0, "Browse scan stopped - partial results kept")
-                if not (pendingPurchase or verifying or quote) then
-                    Status(reason .. " Partial results kept; Buy still verifies each offer.")
-                end
-                if queuedSearch and reason ~= "Auction House closed." then TryQueuedSearch() end
-                Refresh()
-            end)
-            if not started then
-                StopScanWork("failed")
-                scanBusy = false
-                Status("Auction House is not ready to start browsing. Try Scan again when ready.")
-            end
+            StartBrowse()
         else
             ScanProgress(0, "Starting Auctionator scan...")
             scan:InitiateScan()
@@ -372,6 +393,7 @@ end
 
 local function ShowQuote(deal)
     quote = deal
+    if not deal.isCommodity then addon.Listings.Remember(selectedKey, deal) end
     events:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
     events:RegisterEvent("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT")
     Trace("preview", { commodity = deal.isCommodity or false })
@@ -413,6 +435,7 @@ ReadStock = function()
             elseif info and info.itemLink == state.deal.link and info.buyoutAmount == state.deal.cost then
                 local deal, unavailable = addon.LiveDeal(info, itemCache)
                 if deal and not purchased[deal.auctionID] and not seen[deal.auctionID] then
+                    deal.resultIndex = i
                     available, matching = available + deal.available, deal
                     seen[deal.auctionID] = true
                 elseif unavailable then missing = missing + 1 end
@@ -438,10 +461,11 @@ ReadStock = function()
             selectedCandidate.disenchant, selectedCandidate.deNet, selectedCandidate.deGross = matching.disenchant, matching.deNet, matching.deGross
             selectedCandidate.link, selectedCandidate.display = matching.link, matching.link
             addon.SortDeals(candidates)
+            matching.available, matching.availablePartial = available, not full
+            addon.Listings.Remember(selectedKey, matching)
             if batchBuy and batchBuy.remaining > 0 and GetMoney() >= matching.cost then
                 StopTimer()
                 recheck, verifying = nil, false
-                matching.available = available
                 ShowQuote(matching)
                 Refresh()
             else
@@ -555,6 +579,7 @@ ReadLive = function()
     for i = 1, C_AuctionHouse.GetNumItemSearchResults(selectedKey) do
         local deal, missing = addon.LiveDeal(C_AuctionHouse.GetItemSearchResultInfo(selectedKey, i), itemCache)
         if deal and not purchased[deal.auctionID] then
+            deal.resultIndex = i
             live[#live + 1] = deal
         elseif missing then
             missingVendor = missingVendor + 1
@@ -620,6 +645,21 @@ end
 
 TryQueuedSearch = function()
     if not queuedSearch or not Ready() then return end
+    local wait = addon.QueryPace.Wait(false)
+    if wait ~= 0 then
+        if wait then addon.QueryPace.Schedule(wait) end
+        return
+    end
+    -- Missing key metadata can silently discard a native search. Check again
+    -- at dispatch, since the request may have waited behind another scanner.
+    local info = C_AuctionHouse.GetItemKeyInfo(selectedKey)
+    if (issecretvalue and issecretvalue(info)) or type(info) ~= "table"
+        or (issecretvalue and issecretvalue(info.isCommodity)) or type(info.isCommodity) ~= "boolean"
+        or info.isCommodity ~= selectedCommodity then
+        Trace("search_metadata_unavailable")
+        CancelPurchase("Item search data became unavailable. No purchase sent; try Buy again shortly.")
+        return
+    end
     queuedSearch = nil
     StopTimer()
     commodityDeadline = time() + 15
@@ -630,6 +670,7 @@ TryQueuedSearch = function()
     Status("Verifying live price for " .. selectedCandidate.name .. " before purchase...")
     local sorts = { { sortOrder = Enum.AuctionHouseSortOrder.Buyout, reverseSort = false } }
     StampPriceCheck("sent")
+    addon.QueryPace.NoteSearch()
     Trace("search_sent", { commodity = selectedCommodity, level = selectedKey.itemLevel, suffix = selectedKey.itemSuffix })
     if selectedCommodity then C_AuctionHouse.SendSearchQuery(selectedKey, {}, false)
     elseif selectedCandidate.itemKey then C_AuctionHouse.SendSearchQuery(selectedKey, sorts, true)
@@ -646,30 +687,49 @@ PreparePurchase = function(deal)
         return
     end
     addon.Disenchant.ResetCache()
-    local key = deal.itemKey or C_AuctionHouse.MakeItemKey(deal.itemID)
-    local info = C_AuctionHouse.GetItemKeyInfo(key)
-    if not info then
+    local key, commodity = addon.Listings.Key(deal)
+    if not key then
         Status("Item search data is unavailable. Results kept; try Buy again shortly.")
         return
-    elseif issecretvalue and (issecretvalue(info) or issecretvalue(info.isCommodity)) then
-        Status("Item search data is unavailable. Results kept.")
-        return
-    end
-    if not deal.itemKey and info.isCommodity ~= true then
-        -- Sell searches require level/suffix zero. Keep the same normalized key
-        -- for result events and stock checks without changing the client's key.
-        key = { itemID = key.itemID, itemLevel = 0, itemSuffix = 0,
-            battlePetSpeciesID = key.battlePetSpeciesID or 0 }
     end
     PauseScanWork()
+    addon.Listings.Update(nil, false, purchased)
     ClearLive(true)
     selectedKey, selectedCandidate, verifying = key, deal, true
     attempt, attemptStarted = attempt + 1, GetTime()
     priceCheckStarted, priceCheckSent, priceCheckReceived = GetTimePreciseSec(), nil, nil
     addon.LastPriceCheck = { item = deal.itemID, attempt = attempt, state = "queued", queue_ms = 0, total_ms = 0 }
-    selectedCommodity = info.isCommodity == true
+    selectedCommodity = commodity
     commodityDeadline = time() + 15
     if selectedCommodity then selectedCandidate.isCommodity = true end
+    if addon.Listings.Enabled() and not selectedCommodity and not ExternalBrowseBusy() then
+        local prepared = addon.Listings.Quote(deal, purchased)
+        if prepared then
+            verifying = false
+            StampPriceCheck("sent")
+            StampPriceCheck("results")
+            Trace("prepared_listing", { auction = prepared.auctionID, one_click = addon.Listings.OneClick() })
+            ShowQuote(prepared)
+            if quote == prepared and addon.Listings.OneClick() then
+                local limit = math.min(prepared.available, math.floor(GetMoney() / prepared.cost))
+                local goal = prepared.disenchant and math.min(limit, math.max(1, math.floor(prepared.available / 2))) or limit
+                Buy(prepared, goal)
+                if pendingPurchase then StaticPopup_Hide(BUY_DIALOG) end
+            end
+            Refresh()
+            return
+        elseif addon.Listings.InFlight(deal) then
+            -- Join the already dispatched search instead of sending it twice.
+            StampPriceCheck("sent")
+            Status("Finishing the prepared listing check...")
+            timer = C_Timer.NewTimer(15, function()
+                timer = nil
+                CancelPurchase("Prepared listing check timed out. No purchase sent; results kept.")
+            end)
+            Refresh()
+            return
+        end
+    end
     queuedSearch = true
     Status(ExternalBrowseBusy() and "Buy selected. Waiting for the external Auctionator scan to release its search channel."
         or "Buy selected. Discovery paused; waiting for the Auction House search channel.")
@@ -707,15 +767,7 @@ Buy = function(deal, requested)
         return
     end
     addon.Disenchant.ResetCache()
-    local current
-    for i = 1, C_AuctionHouse.GetNumItemSearchResults(selectedKey) do
-        local info = C_AuctionHouse.GetItemSearchResultInfo(selectedKey, i)
-        if info and not (issecretvalue and issecretvalue(info.auctionID))
-            and info.auctionID == deal.auctionID then
-            current = addon.LiveDeal(info)
-            break
-        end
-    end
+    local current = addon.Listings.Current(selectedKey, deal)
     if not addon.SameListing(deal, current) then
         CancelPurchase("Listing changed or disappeared. Purchase not sent.", true)
         return
@@ -736,7 +788,7 @@ Buy = function(deal, requested)
         CancelPurchase(pendingError and "Purchase outcome remains uncertain. Check mail/gold before buying again."
             or "Purchase not confirmed. Check mail/gold before buying again.", true)
     end)
-    -- Only the confirmation button's hardware click calls this. Keep frames and
+    -- Only a confirmation or prepared-row hardware click calls this. Keep frames and
     -- results intact before the restricted call, matching Auctionator's ordering.
     Trace("item_buy_sent", { quantity = 1 })
     C_AuctionHouse.PlaceBid(deal.auctionID, deal.cost)
@@ -1045,6 +1097,22 @@ function addon.ChangeMinimumProfit(value)
     Refresh()
 end
 
+function addon.ChangePrepareListings(enabled)
+    if selectedKey or pendingPurchase or verifying or quote or recheck then Refresh(); return end
+    addon.Listings.SetEnabled(enabled)
+    Status(enabled and "Preparing up to 20 affordable item listings while this tab is idle. Buy still checks the actual auction."
+        or "Background listing preparation disabled.")
+    Refresh()
+end
+
+function addon.ChangeOneClickPrepared(enabled)
+    if selectedKey or pendingPurchase or verifying or quote or recheck then Refresh(); return end
+    addon.Listings.SetOneClick(enabled)
+    Status(enabled and "Prepared Buy 1 buttons buy one auction on your click. Unprepared listings load for confirmation."
+        or "Prepared listings open a confirmation before buying.")
+    Refresh()
+end
+
 Refresh = function()
     local editable = not selectedKey and not pendingPurchase and not verifying and not quote and not recheck
     if addon.Settings then
@@ -1083,6 +1151,7 @@ Refresh = function()
     UpdateEnabled(window.safeDisenchant, idle and not recheck and not selectedKey and not IsBusy())
     UpdateEnabled(window.minimumProfit, not selectedKey and not pendingPurchase and not verifying and not quote and not recheck)
     UpdateEnabled(window.scan, connected and houseOpen and not IsBusy() and idle)
+    UpdateEnabled(window.quick, connected and houseOpen and not IsBusy() and idle)
     UpdateText(window.scan, scanBusy and "Scanning..." or "Scan Auction House")
     UpdateEnabled(window.more, selectedKey ~= nil and idle and not recheck
         and not (selectedCommodity and C_AuctionHouse.HasFullCommoditySearchResults(selectedKey.itemID)
@@ -1100,10 +1169,12 @@ Refresh = function()
             UpdateMoney(row.cost, deal.cost)
             UpdateMoney(row.vendor, deal.deNet or deal.vendor)
             UpdateMoney(row.profit, deal.profit, deal.disenchant and "|cffcc99ff" or "|cff44ff44")
-            UpdateText(row.action, verifying and selectedCandidate == deal and "Wait..." or deal.isCommodity and "Buy qty" or "Buy")
+            UpdateText(row.action, verifying and selectedCandidate == deal and "Wait..." or deal.isCommodity and "Buy qty"
+                or addon.Listings.OneClick() and addon.Listings.Has(deal) and "Buy 1" or "Buy")
             UpdateEnabled(row.action, houseOpen and idle and not (recheck and selectedCandidate == deal))
         end
     end
+    addon.Listings.Update(list, houseOpen and window:IsShown() and editable and not IsBusy(), purchased)
 end
 
 local function EnsureTab()
@@ -1199,9 +1270,11 @@ local function EnsureTab()
         window.status:SetHeight(36)
         window.status:SetText(message)
         window.database = Label(window, 20, -403, 750)
-        window.scan = Button(window, "Scan Auction House", 160, StartScan)
+        window.scan = Button(window, "Scan Auction House", 135, StartScan)
         window.scan:SetPoint("BOTTOMLEFT", 20, 15)
-        window.more = Button(window, "More listings", 100, function()
+        window.quick = Button(window, "Quick scan", 80, StartQuickScan)
+        window.quick:SetPoint("LEFT", window.scan, "RIGHT", 6, 0)
+        window.more = Button(window, "More listings", 90, function()
             if selectedKey and not pendingPurchase and not quote and not verifying and Ready() then
                 PauseScanWork()
                 StopTimer()
@@ -1215,9 +1288,9 @@ local function EnsureTab()
                 Refresh()
             end
         end)
-        window.more:SetPoint("LEFT", window.scan, "RIGHT", 8, 0)
-        window.log = Button(window, "Debug log", 90, addon.Diagnostics.Show)
-        window.log:SetPoint("LEFT", window.more, "RIGHT", 8, 0)
+        window.more:SetPoint("LEFT", window.quick, "RIGHT", 6, 0)
+        window.log = Button(window, "Debug log", 75, addon.Diagnostics.Show)
+        window.log:SetPoint("LEFT", window.more, "RIGHT", 6, 0)
         window.previous = Button(window, "Previous", 80, function() page = page - 1; Refresh() end)
         window.previous:SetPoint("BOTTOMRIGHT", -190, 15)
         window.page = Label(window, 0, 0, 80)
@@ -1230,6 +1303,7 @@ local function EnsureTab()
             Refresh()
         end)
         window:SetScript("OnHide", function()
+            addon.Listings.Update(nil, false, purchased)
             if addon.BrowseScanner and addon.BrowseScanner.Active() then
                 addon.BrowseScanner.Stop()
                 if scanWork and scanWork.ownedBrowse and scanWork.receiving then
@@ -1268,13 +1342,14 @@ local function ReplicateCount()
         and count >= 0 and count < math.huge and count == math.floor(count) then return count end
 end
 
-ProcessScan = function(data, isBrowse, receiving)
+ProcessScan = function(data, isBrowse, receiving, quickKeys)
+    local previous = quickKeys and candidates
     StopScanWork()
     ClearLive(true)
     scanBusy = true
     excluded, liveValued = {}, {}
     scanCoverage, lastScanAt = nil, nil
-    candidates, page = {}, 1
+    candidates, page = quickKeys and previous or {}, 1
     local work = { paused = false, receiving = receiving, isBrowse = isBrowse, startedAt = GetTime(), batchSeconds = 0,
         preciseStart = GetTimePreciseSec(), vendorRequests = 0, vendorActive = 0, vendorReferences = 0,
         vendorPendingSeconds = 0, vendorPendingAfterInput = 0, vendorLoadingSeconds = 0,
@@ -1289,6 +1364,11 @@ ProcessScan = function(data, isBrowse, receiving)
         work.replicateCount, work.replicateGeneration = ReplicateCount(), replicateGeneration
     end
     local best, itemCache, index = {}, {}, 1
+    local watched, refreshed = {}, {}
+    if quickKeys then
+        for _, key in ipairs(quickKeys) do watched[key.itemID] = true end
+        for _, deal in ipairs(previous) do best[deal.itemID] = deal end
+    end
     local retryRows, loadIDs, queued, loadReferences, previews = {}, {}, {}, {}, {}
     local retried, dirty, lastPublished = false, false, -math.huge
     local stats = { priced = 0, unavailable = 0, noVendor = 0, notCheap = 0, belowMinimum = 0, unsupported = 0, filtered = 0,
@@ -1322,7 +1402,7 @@ ProcessScan = function(data, isBrowse, receiving)
         local pending, tail = PendingSeconds(now)
         local paused = (work.pausedSeconds or 0) + (work.profilePauseAt and (rawNow - work.profilePauseAt) or 0)
         local profile = {
-            outcome = outcome, source = isBrowse and "browse" or "replicate", at = time(), rows = total,
+            outcome = outcome, source = quickKeys and "quick" or isBrowse and "browse" or "replicate", at = time(), rows = total,
             minimum_profit = addon.GetMinimumProfit(), scan_ms = Milliseconds(rawNow - work.preciseStart),
             active_ms = Milliseconds(now - work.preciseStart), pause_ms = Milliseconds(paused),
             provider_ms = Milliseconds((work.inputClosedAt or GetTime()) - work.startedAt),
@@ -1369,6 +1449,7 @@ ProcessScan = function(data, isBrowse, receiving)
         local previous = best[deal.itemID]
         if not previous or deal.profit > previous.profit then
             best[deal.itemID], dirty = deal, true
+            addon.History.RememberOpportunity(deal)
         end
     end
 
@@ -1409,6 +1490,11 @@ ProcessScan = function(data, isBrowse, receiving)
     end
 
     local function Finish()
+        if quickKeys and not work.partial then
+            for id in pairs(watched) do
+                if not refreshed[id] and not liveValued[id] then best[id], dirty = nil, true end
+            end
+        end
         Publish(true)
         scanWork, scanBusy = nil, false
         lastScanAt, scanStartedAt = snapshotAt, nil
@@ -1434,6 +1520,7 @@ ProcessScan = function(data, isBrowse, receiving)
         else
             scanCoverage = scanCoverage .. " Trimmed means not saved: incomplete price snapshot."
         end
+        if quickKeys then scanCoverage = "Quick scan: " .. #quickKeys .. " known keys only. " .. scanCoverage end
         if work.partial then
             scanCoverage = "Partial discovery stopped. " .. scanCoverage
             ScanProgress(1, "Partial scan - " .. #candidates .. " candidates")
@@ -1447,7 +1534,7 @@ ProcessScan = function(data, isBrowse, receiving)
         Status(CandidateStatus())
         work.SaveProfile(work.partial and "partial" or "complete")
         Trace("scan_complete", { rows = total, priced = stats.priced, unavailable = stats.unavailable,
-            candidates = #candidates, source = isBrowse and "browse" or "replicate",
+            candidates = #candidates, source = quickKeys and "quick" or isBrowse and "browse" or "replicate",
             minimum_profit = addon.GetMinimumProfit(),
             scan_ms = math.floor((GetTime() - work.startedAt) * 1000 + 0.5),
             batch_ms = math.floor(work.batchSeconds * 1000 + 0.5),
@@ -1482,10 +1569,11 @@ ProcessScan = function(data, isBrowse, receiving)
         if not historyStep then
             local last = math.min(historyIndex + 999, work.replicateCount - 1)
             for i = historyIndex, last do
-                local valid = addon.History.RecordReplicateDistribution(work.meanScan, { C_AuctionHouse.GetReplicateItemInfo(i) })
+                local valid, reason = addon.History.RecordReplicateDistribution(work.meanScan, { C_AuctionHouse.GetReplicateItemInfo(i) })
                 historyIndex = i + 1
                 work.historyRows = historyIndex
                 if not valid then
+                    Trace("history_snapshot_rejected", { index = i, reason = reason })
                     local elapsed = GetTimePreciseSec() - started
                     work.historySeconds = (work.historySeconds or 0) + elapsed
                     work.batchSeconds = work.batchSeconds + elapsed
@@ -1667,6 +1755,13 @@ ProcessScan = function(data, isBrowse, receiving)
         for i = index, math.min(index + 999, #data) do
             local entry = data[i]
             local info = entry and entry.replicateInfo
+            if quickKeys and not retried and entry and entry.itemKey then
+                local id = entry.itemKey.itemID
+                if watched[id] and not refreshed[id] then
+                    refreshed[id] = true
+                    if not liveValued[id] then best[id], dirty = nil, true end
+                end
+            end
             if work.deOnly then
                 Consider(Value(entry))
             else
@@ -1895,7 +1990,16 @@ local function ConnectAuctionator()
 end
 
 local function OpenHouse()
-    houseOpen = true
+    if not houseOpen then
+        houseOpen = true
+        addon.Listings.SetActive(true)
+        addon.QueryPace.SetActive(true, function()
+            if queuedSearch then TryQueuedSearch(); return end
+            if pendingPurchase or verifying or quote or recheck then return end
+            if addon.BrowseScanner then addon.BrowseScanner.Wake() end
+            addon.Listings.Wake()
+        end)
+    end
     for _, name in ipairs(HOUSE_EVENTS) do events:RegisterEvent(name) end
     ConnectAuctionator()
     EnsureTab()
@@ -1915,6 +2019,19 @@ events:SetScript("OnEvent", function(_, event, arg, success)
         local saved = addon.History.Initialize(ProfitMasterDB)
         if saved then ProfitMasterDB = saved end
         addon.InitializeProfitSettings(saved)
+        addon.Listings.Initialize(saved, function(candidate, prepared)
+            if selectedKey or IsBusy() or not houseOpen or not prepared then return end
+            for _, deal in ipairs(candidates) do
+                if deal == candidate then
+                    for _, field in ipairs({ "link", "quantity", "cost", "vendor", "profit", "disenchant", "deNet", "deGross",
+                        "available", "availablePartial" }) do deal[field] = prepared[field] end
+                    deal.display = prepared.link
+                    addon.SortDeals(candidates)
+                    Refresh()
+                    return
+                end
+            end
+        end)
         if addon.Settings then addon.Settings.Initialize(saved) end
         events:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
@@ -1939,6 +2056,8 @@ events:SetScript("OnEvent", function(_, event, arg, success)
             scanWork.replicateCount, scanWork.replicateGeneration = ReplicateCount(), replicateGeneration
         end
     elseif event == "AUCTION_HOUSE_CLOSED" and houseOpen then
+        addon.Listings.SetActive(false)
+        addon.QueryPace.SetActive(false)
         if addon.BrowseScanner then addon.BrowseScanner.Stop() end
         StopScanWork()
         if scanBusy then ScanProgress(0, "Scan stopped - Auction House closed") end
@@ -2050,6 +2169,7 @@ end
 SlashCmdList["PROFITMASTER"] = function(input)
     local command = type(input) == "string" and input:lower():match("^%s*(.-)%s*$") or ""
     if command == "log" then addon.Diagnostics.Show()
+    elseif command == "quick" then ShowWindow(); StartQuickScan()
     elseif command == "settings" then addon.Settings.Toggle()
     elseif command == "debug on" or command == "debug off" then
         addon.ChangeDebug(command == "debug on")

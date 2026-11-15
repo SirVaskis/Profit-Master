@@ -60,6 +60,57 @@ function history.SetMarket(key)
     end
 end
 
+local function WatchKey(key)
+    if (issecretvalue and issecretvalue(key)) or type(key) ~= "table"
+        or not Number(key.itemID, 1) or key.itemID ~= math.floor(key.itemID) then return nil end
+    local level, suffix, pet = key.itemLevel, key.itemSuffix, key.battlePetSpeciesID
+    if issecretvalue and (issecretvalue(level) or issecretvalue(suffix) or issecretvalue(pet)) then return nil end
+    level, suffix, pet = level or 0, suffix or 0, pet or 0
+    if not Number(level, 0) or not Number(suffix, -math.huge) or not Number(pet, 0)
+        or level ~= math.floor(level) or suffix ~= math.floor(suffix) or pet ~= math.floor(pet) then return nil end
+    return table.concat({ key.itemID, level, suffix, pet }, ":"), level, suffix, pet
+end
+
+function history.QuickKeys()
+    local list = {}
+    local watched = db and db.quickItems
+    if type(watched) ~= "table" then return list end
+    for identity, entry in pairs(watched) do
+        if type(entry) == "table" and WatchKey(entry) == identity
+            and Number(entry.at, 0) and Number(entry.profit, 0) then list[#list + 1] = entry end
+    end
+    table.sort(list, function(a, b)
+        if a.at ~= b.at then return a.at > b.at end
+        if a.profit ~= b.profit then return a.profit > b.profit end
+        return a.itemID < b.itemID
+    end)
+    local keys = {}
+    for i = 1, math.min(300, #list) do
+        local entry = list[i]
+        keys[i] = { itemID = entry.itemID, itemLevel = entry.itemLevel,
+            itemSuffix = entry.itemSuffix, battlePetSpeciesID = entry.battlePetSpeciesID }
+    end
+    return keys
+end
+
+function history.RememberOpportunity(deal)
+    if not db or type(deal) ~= "table" or not Number(deal.profit, 1) then return end
+    if db.quickItems == nil then db.quickItems = {} end
+    if type(db.quickItems) ~= "table" then return end
+    local key = deal.itemKey or C_AuctionHouse.MakeItemKey(deal.itemID)
+    local identity, level, suffix, pet = WatchKey(key)
+    if not identity or pet ~= 0 then return end
+    db.quickItems[identity] = { itemID = key.itemID, itemLevel = level, itemSuffix = suffix,
+        battlePetSpeciesID = pet, at = time(), profit = deal.profit }
+    local count, oldest, oldestAt = 0, nil, math.huge
+    for id, entry in pairs(db.quickItems) do
+        count = count + 1
+        local at = type(entry) == "table" and Number(entry.at, 0) and entry.at or 0
+        if at < oldestAt then oldest, oldestAt = id, at end
+    end
+    if count > 300 and oldest then db.quickItems[oldest] = nil end
+end
+
 function history.RecordVendor(link, name, price, observedAt)
     if not db or (issecretvalue and (issecretvalue(link) or issecretvalue(name)))
         or type(link) ~= "string" or type(name) ~= "string" or not Number(price, 0) then return end
@@ -125,16 +176,19 @@ end
 -- Numeric replicate data is sufficient; item-name/vendor cache residency is not.
 -- This path records distributions only and never changes legacy observations.
 function history.RecordReplicateDistribution(scan, info)
-    if not scan or scan.source ~= "replicate" or scan.meanStatus ~= "open" or not scan.meanValid then return false end
+    if not scan or scan.source ~= "replicate" or scan.meanStatus ~= "open" or not scan.meanValid then return false, "inactive_snapshot" end
     if (issecretvalue and issecretvalue(info)) or type(info) ~= "table" then
         scan.meanValid = false
-        return false
+        return false, "unavailable_row"
     end
     local id, quantity, buyout = info[17], info[3], info[10]
-    if not Number(id, 1) or id ~= math.floor(id) or not Number(quantity, 1)
-        or quantity ~= math.floor(quantity) or not Number(buyout, 0) or buyout ~= math.floor(buyout) then
+    local reason
+    if not Number(id, 1) or id ~= math.floor(id) then reason = "invalid_item_id"
+    elseif not Number(quantity, 1) or quantity ~= math.floor(quantity) then reason = "invalid_quantity"
+    elseif not Number(buyout, 0) or buyout ~= math.floor(buyout) then reason = "invalid_buyout" end
+    if reason then
         scan.meanValid = false
-        return false
+        return false, reason
     end
     if buyout == 0 then return true end -- Bid-only auctions have no buyout price.
     local price, key = buyout / quantity, "replicate:" .. id
@@ -143,7 +197,7 @@ function history.RecordReplicateDistribution(scan, info)
     local count, samples = (group.prices[price] or 0) + quantity, group.samples + quantity
     if not Number(count, 1) or not Number(samples, 1) or samples > 9007199254740991 then
         scan.meanValid = false
-        return false
+        return false, "excessive_quantity"
     end
     group.prices[price], group.samples = count, samples
     return true

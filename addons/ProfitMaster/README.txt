@@ -1,13 +1,36 @@
-Profit Master 0.1.34 - bag advice outside the Auction House
+Profit Master 0.2.0 - Quick scan and prepared purchases
 
 Requires WoW Forever (Interface 16001) and Auctionator.
 Auctionator is a required dependency in the TOC, not an optional integration.
-Affected APIs source-checked against Forever build 1.60.1.70938 and Auctionator 346.
+Affected APIs source-checked against Forever build 1.60.1.70938 and Auctionator 347.
 This version is not yet tested in-game. Auctionator integration uses internal scan events and its
 full-scan controller; future Auctionator changes may require an update.
 
+0.2.0 update: fully restart WoW to load the new manifest files.
+- Quick scan refreshes up to 300 recently profitable item keys in batches of 50.
+  Run a full scan first to learn opportunities. Quick scan does not discover the
+  entire AH or collect trimmed means. Unwatched candidates remain available.
+  Use the button or /pmaster quick. Buy pauses its next query/page.
+- While the Profit Master tab is idle, prepare up to 20 affordable non-commodity
+  opportunities, one search at a time. Preparation stops during scans, purchase
+  checks and hidden tabs. Closing the AH clears temporary preparation data.
+- Prepared rows say Buy 1: that click spends gold on one auction. The native
+  result book must still contain the exact ID, current price and verified value.
+  A changed or evicted listing loads a fresh confirmation; stale saved copies
+  never authorize a bid. Prepared quotes expire after 60 seconds.
+- Quantity goals remain available. Further individual copies each need another
+  click; commodities retain their quantity confirmation and exact server quote.
+- Minimap settings include Prepare item listings and Buy prepared items with
+  one click (both default ON). Turn the latter off to always confirm first.
+- Our background searches reserve 25 of our 100/minute search slots for player
+  checks, also honoring native readiness and backing off after dropped messages.
+  Auctionator's external autoscan still owns the shared channel while it runs;
+  disable its open-AH autoscan if that is delaying your manual purchase checks.
+- No fixed live speedup is claimed. New fast paths have offline coverage; native
+  latency, SearchForItemKeys event behavior and the new layout need your check.
+
 Minimap settings and idle behavior
-- Click the gold-coin minimap button for all four existing settings: debug logging,
+- Click the gold-coin minimap button for debug logging,
   disenchant profits, safe disenchant, and minimum profit in copper per item.
   The panel also opens the existing manual Debug report. /pmaster settings opens
   the same panel without the Auction House; /pmaster still opens the auction tab.

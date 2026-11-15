@@ -291,6 +291,22 @@ now = now + 30 * DAY
 history.Prune(now)
 check(restoredStats.markets.Stats.days[statsDay] == nil and restoredStats.markets.Stats.days[statsDay + 1],
     "the existing thirty-day pruning removes complete per-scan records with their owning day bucket")
+local quickSaved = assert(history.Initialize(nil))
+for id = 1, 350 do
+    history.RememberOpportunity({ itemID = id, itemKey = browse(id, 50).itemKey, profit = 10 })
+    now = now + 1
+end
+local keys = history.QuickKeys()
+local count = 0
+for _ in pairs(quickSaved.quickItems) do count = count + 1 end
+check(count == 300 and #keys == 300 and keys[1].itemID == 350 and keys[300].itemID == 51,
+    "watchlist storage is bounded and keeps the 300 most recent opportunities")
+keys[1].itemID = 9999
+check(history.QuickKeys()[1].itemID == 350, "returned watchlist keys cannot mutate saved data")
+history.RememberOpportunity({ itemID = 1, itemKey = browse(1, 50, 1, "SECRET").itemKey, profit = 20 })
+check(history.QuickKeys()[1].itemID == 350, "restricted key fields are skipped before key construction")
+history.Initialize(quickSaved)
+check(#history.QuickKeys() == 300, "learned opportunities survive SavedVariables initialization")
 local future = { version = 99, items = {}, markets = {}, marker = "preserve" }
 check(history.Initialize(future) == nil and future.marker == "preserve" and future.version == 99, "unknown database version is preserved and safely disabled")
 history.RecordVendor("item:5", "No write", 50, now)

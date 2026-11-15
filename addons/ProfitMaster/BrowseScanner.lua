@@ -2,7 +2,7 @@ local _, addon = ...
 local scanner = {}
 addon.BrowseScanner = scanner
 
--- Public browse API/events checked against Forever 1.60.1.70888. Item searches
+-- Public browse API/events checked against Forever 1.60.1.70938. Item searches
 -- update browse summaries too, so only the initial UPDATED starts this snapshot.
 local frame = CreateFrame("Frame")
 local state
@@ -68,6 +68,8 @@ local function Append(work, rows)
                     if Integer(id, 1) and Integer(level, 0) and Integer(suffix, -math.huge) and Integer(pet, 0)
                         and Integer(quantity, 1) and Integer(price, 1) then
                         local identity = table.concat({ id, level, suffix, pet }, ":")
+                        if work.expected and not work.expected[id] then return false end
+                        if work.batches then work.batchRows = work.batchRows + 1 end
                         if not work.seen[identity] then
                             work.seen[identity] = true
                             work.rows[#work.rows + 1] = row
@@ -87,12 +89,22 @@ local function Received(work, rows)
     work.onRows(work.rows)
     if state ~= work then return end
     local full = Full(work)
-    if full then Finish(work)
+    if full and work.batches and work.batchRows == 0 then
+        -- The comparison addon reports an initial empty reply on Forever.
+        -- Retry once; two empty replies leave coverage uncertain rather than
+        -- deleting all watched candidates as if the market were empty.
+        if work.emptyRetry then Finish(work, "Quick scan returned no rows for a batch; use a full scan to confirm.")
+        else work.emptyRetry, work.nextBatch = true, true; NextPage(work) end
+    elseif full and work.batches and work.batch < #work.batches then
+        work.emptyRetry = nil
+        work.batch, work.nextBatch = work.batch + 1, true
+        NextPage(work)
+    elseif full then Finish(work)
     elseif full == false then NextPage(work) end
 end
 
 NextPage = function(work)
-    if state ~= work or work.paused or work.pending or work.initial then return end
+    if state ~= work or work.paused or work.pending or (work.initial and not work.nextBatch) then return end
     if work.sending then work.nextNeeded = true; return end
     local ready = C_AuctionHouse.IsThrottledMessageSystemReady()
     if not Public(ready) or ready ~= true then
@@ -100,9 +112,25 @@ NextPage = function(work)
         if not work.timer then Arm(work) end
         return
     end
+    if work.nextBatch and addon.QueryPace then
+        local wait = addon.QueryPace.Wait(true)
+        if wait ~= 0 then
+            if wait then Arm(work, wait + 15); addon.QueryPace.Schedule(wait) end
+            return
+        end
+    end
     work.pending, work.sending = true, true
     Arm(work)
-    C_AuctionHouse.RequestMoreBrowseResults()
+    if work.nextBatch then
+        work.initial, work.nextBatch = true, nil
+        work.batchRows = 0
+        work.expected = {}
+        for _, key in ipairs(work.batches[work.batch]) do
+            work.expected[key.itemID] = true
+        end
+        if addon.QueryPace then addon.QueryPace.NoteSearch() end
+        C_AuctionHouse.SearchForItemKeys(work.batches[work.batch], {})
+    else C_AuctionHouse.RequestMoreBrowseResults() end
     work.sending = false
     if state == work and work.nextNeeded and not work.paused then
         work.nextNeeded = nil
@@ -111,6 +139,10 @@ NextPage = function(work)
             if state == work then work.timer = nil; NextPage(work) end
         end)
     end
+end
+
+function scanner.Wake()
+    if state then NextPage(state) end
 end
 
 function scanner.Active()
@@ -154,15 +186,48 @@ function scanner.Start(onRows, onComplete, onFailed)
     return true
 end
 
+-- Refresh known item keys without claiming coverage of the entire market.
+-- Fifty keys per request keeps each batch small; the persisted list is capped.
+function scanner.StartKeys(keys, onRows, onComplete, onFailed)
+    if state or type(keys) ~= "table" or type(onRows) ~= "function" or type(onComplete) ~= "function"
+        or type(onFailed) ~= "function" or not C_AuctionHouse.SearchForItemKeys then return false end
+    local batches, seen, count = {}, {}, 0
+    for _, key in ipairs(keys) do
+        if not Public(key) or type(key) ~= "table" then return false end
+        local id, level, suffix, pet = key.itemID, key.itemLevel, key.itemSuffix, key.battlePetSpeciesID
+        if not Public(level) or not Public(suffix) or not Public(pet) then return false end
+        level, suffix, pet = level or 0, suffix or 0, pet or 0
+        if not Integer(id, 1) or not Integer(level, 0) or not Integer(suffix, -math.huge) or not Integer(pet, 0) then return false end
+        local identity = table.concat({ id, level, suffix, pet }, ":")
+        if not seen[identity] then
+            seen[identity] = true
+            if count >= 300 then break end
+            local index = math.floor(count / 50) + 1
+            if not batches[index] then batches[index] = {} end
+            local batch = batches[index]
+            batch[#batch + 1] = { itemID = id, itemLevel = level, itemSuffix = suffix, battlePetSpeciesID = pet }
+            count = count + 1
+        end
+    end
+    if #batches == 0 then return false end
+    local work = { rows = {}, seen = {}, batches = batches, batch = 1, nextBatch = true,
+        onRows = onRows, onComplete = onComplete, onFailed = onFailed }
+    state = work
+    for _, name in ipairs(EVENTS) do frame:RegisterEvent(name) end
+    Arm(work)
+    NextPage(work)
+    return true
+end
+
 frame:SetScript("OnEvent", function(_, event, rows)
     local work = state
     if not work then return end
     if event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
-        if not work.initial then return end
+        if not work.initial or not work.pending then return end
         work.initial = false
         Received(work, C_AuctionHouse.GetBrowseResults())
     elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
-        if not work.initial then Received(work, rows) end
+        if not work.initial and not work.nextBatch then Received(work, rows) end
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
         NextPage(work)
     elseif event == "AUCTION_HOUSE_BROWSE_FAILURE" then Finish(work, "Browse request failed.")

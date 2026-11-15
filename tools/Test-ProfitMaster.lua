@@ -309,6 +309,8 @@ assert(loadfile("addons/ProfitMaster/Diagnostics.lua"))("ProfitMaster", addon)
 assert(loadfile("addons/ProfitMaster/BagMarkers.lua"))("ProfitMaster", addon)
 assert(loadfile("addons/ProfitMaster/OwnedAuctions.lua"))("ProfitMaster", addon)
 assert(loadfile("addons/ProfitMaster/Settings.lua"))("ProfitMaster", addon)
+assert(loadfile("addons/ProfitMaster/QueryPace.lua"))("ProfitMaster", addon)
+assert(loadfile("addons/ProfitMaster/Listings.lua"))("ProfitMaster", addon)
 local deal = addon.Deal("item:1", 20, 1500)
 check(deal.profit == 500 and deal.vendor == 2000, "whole-stack copper arithmetic")
 check(not addon.Deal("item:1", 1, 100), "equal price excluded")
@@ -355,6 +357,10 @@ dispatch = event
 event("ADDON_LOADED", "OtherAddon")
 check(ProfitMasterDB == nil, "unrelated load event cannot create saved data")
 event("ADDON_LOADED", "ProfitMaster")
+-- Legacy purchase fixtures drive each search explicitly. Preparation has its
+-- own scenarios, so it must not consume extra native searches in these cases.
+addon.Listings.SetEnabled(false)
+addon.Listings.SetOneClick(false)
 check(ProfitMasterDebugDB and not addon.Diagnostics.Enabled() and ProfitMasterDebugDB.count == 0,
     "debug settings initialize disabled without changing auction history")
 check(ProfitMasterDB and ProfitMasterDB.version == 1, "database initializes after its own SavedVariables load event")
