@@ -6,7 +6,9 @@ Affected APIs source-checked against Forever build 1.60.1.70938 and Auctionator 
 This version is not yet tested in-game. Auctionator integration uses internal scan events and its
 full-scan controller; future Auctionator changes may require an update.
 
-0.2.0 update: fully restart WoW to load the new manifest files.
+0.2.0 update: use /reload, then check that Quick scan appears. The previous
+mandatory-full-restart instruction was too strong; exact Forever reload behavior
+is still a manual check. Restart only as a fallback if the update fails to load.
 - Quick scan refreshes up to 300 recently profitable item keys in batches of 50.
   Run a full scan first to learn opportunities. Quick scan does not discover the
   entire AH or collect trimmed means. Unwatched candidates remain available.
@@ -201,8 +203,8 @@ Footer startup fix
   footer initialized, and also affect later price updates.
 - The owned-auction display now initializes before the separate scan/bag
   integrations, so a bag startup error cannot prevent its event registration.
-- After updating from 0.1.24/0.1.25, fully exit and reopen WoW once to ensure the
-  new OwnedAuctions.lua manifest entry is loaded, then open the Auctions tab.
+- After updating from 0.1.24/0.1.25, use /reload and open the Auctions tab.
+  A full restart is a fallback if the new footer fails to load.
 
 Auction payout totals
 - The native Auctions tab shows Total (5% cut) and Incoming to the left of Cancel
@@ -602,8 +604,8 @@ Limits
 Installation
 Use the workspace tools/Install-Addon.ps1 -Name ProfitMaster helper, or copy this
 ProfitMaster folder into the Forever client's Interface/AddOns folder.
-If installed while the game is running, fully restart the client for addon discovery.
-Only /reload is needed for later file updates to an already discovered addon.
+If installed while the game is running, use /reload and check that it appears.
+Use a full restart as a fallback if addon discovery or the update fails to load.
 
 Manual test checklist
 - Confirm Auctionator still opens, scans and buys normally.

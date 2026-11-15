@@ -1,6 +1,7 @@
 # Profit Master
 
-Current build: **0.2.0**. The scan/buy merge, checks and restart checklist are in
+Current build: **0.2.0**. Use `/reload` first; a full restart is a fallback if the
+new controls fail to load. The scan/buy merge, checks and manual checklist are in
 [the 2026-11-15 comparison](profit-master-comparison-20261115.md). Development and
 the connected Git checkout now live at `C:\src\Profit-Master`; older entries below
 record their original build dates and limitations.

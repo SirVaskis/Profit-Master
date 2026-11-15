@@ -96,7 +96,13 @@ the rejected raw row index and reason instead of accepting an inaccurate mean.
 
 ## Manual check after installation
 
-1. Fully restart the client for the new TOC files. Confirm version 0.2.0.
+The earlier mandatory-restart instruction was too strong. Modern-client new-file
+and TOC reload support is recorded in the UI developers'
+[9.0.1 change notes](https://github.com/Stanzilla/WoWUIBugs/wiki/9.0.1-Consolidated-UI-Changes#notable-changes).
+That supports trying `/reload` first; the exact Forever build has not been tested
+here. A full restart is a fallback if new files fail to load.
+
+1. Use `/reload`. Confirm version 0.2.0 and that Quick scan appears.
 2. Run a normal scan with debug enabled; use Quick scan afterward and compare
    coverage/time. Inspect `/pmaster log` for `source=quick` and preparation timing.
 3. On an inexpensive prepared row, verify **Buy 1** spends once. Confirm another

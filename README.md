@@ -17,9 +17,10 @@ their existing server-quote confirmation. See [the comparison and checks](docs/p
 ## Install
 
 Install Auctionator, then copy `addons/ProfitMaster` into your client's
-`Interface/AddOns` directory. Restart the client for a first installation;
-`/reload` loads later updates to existing addon files. **Restart the client for
-the 0.2.0 update**, which adds files to the manifest.
+`Interface/AddOns` directory. Use `/reload` to load the update, including the new
+0.2.0 manifest files. Check that the Quick scan button appears. A full restart
+is a fallback if the addon or new controls fail to load, not a requirement
+established for this Forever build.
 
 Open the **Profit Master** Auction House tab, or use `/pmaster`. The minimap
 button and `/pmaster settings` open settings. `/pmaster log` opens the manual,
